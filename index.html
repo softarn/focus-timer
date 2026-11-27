@@ -17,10 +17,30 @@
       <button id="toggle" type="button" class="btn btn-primary">Start</button>
       <button id="reset" type="button" class="btn">Reset</button>
     </div>
-    <!-- Announces phase changes only. -->
+    <p id="daily-count" class="daily-count">Today: 0 focus sessions</p>
+    <details class="settings">
+      <summary>Settings</summary>
+      <form id="settings-form" novalidate>
+        <div class="settings-field">
+          <label for="focus-minutes">Focus minutes</label>
+          <input id="focus-minutes" type="number" min="1" max="90" step="1" inputmode="numeric" required aria-describedby="focus-error">
+        </div>
+        <div class="settings-field">
+          <label for="break-minutes">Break minutes</label>
+          <input id="break-minutes" type="number" min="1" max="90" step="1" inputmode="numeric" required aria-describedby="break-error">
+        </div>
+        <div class="settings-errors" role="alert" aria-atomic="true">
+          <p id="focus-error"></p>
+          <p id="break-error"></p>
+        </div>
+        <button type="submit" class="btn">Save</button>
+      </form>
+    </details>
+    <!-- Announces phase changes and settings confirmations. -->
     <p id="status" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></p>
   </main>
   <script src="timer.js"></script>
+  <script src="settings.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
