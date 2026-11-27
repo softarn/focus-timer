@@ -65,7 +65,7 @@ body {
   justify-content: center;
 }
 .btn {
-  min-width: 44px;
+  min-width: 48px;
   min-height: 48px;
   padding: 0 24px;
   flex: 1 1 120px;
@@ -82,10 +82,63 @@ body {
   background: var(--accent);
   border-color: var(--accent);
 }
-.btn:focus-visible {
+.btn:focus-visible,
+.settings summary:focus-visible,
+.settings input:focus-visible {
   outline: 3px solid var(--text);
   outline-offset: 3px;
 }
+.daily-count {
+  margin: 20px 0 12px;
+  color: var(--muted);
+}
+.settings {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  text-align: left;
+}
+.settings summary {
+  min-height: 48px;
+  padding: 12px;
+  border-radius: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.settings form {
+  display: grid;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+.settings-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 5rem;
+  gap: 8px;
+  align-items: center;
+}
+.settings label {
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+}
+.settings input {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 8px;
+  background: var(--card);
+  color: var(--text);
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+  font-size: max(16px, 1rem);
+}
+.settings input[aria-invalid="true"] { border-color: var(--text); }
+.settings-errors p:empty { margin: 0; }
+.settings-errors p {
+  margin: 0 0 4px;
+  font-size: .875rem;
+  font-weight: 600;
+}
+#status:not(.visually-hidden) { margin: 12px 0 0; }
 .visually-hidden {
   position: absolute;
   width: 1px;

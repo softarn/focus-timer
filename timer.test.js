@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
-const { createTimer, formatTime, FOCUS_MS, BREAK_MS } = require('./timer.js');
+const { createTimer, formatTime, countFocusCompletions, FOCUS_MS, BREAK_MS } = require('./timer.js');
 
 test('initial state is idle focus with 25:00', () => {
   const s = createTimer().getState();
@@ -93,4 +93,64 @@ test('loads as a plain script without module/DOM', () => {
   ctx.self = ctx;
   vm.runInNewContext(fs.readFileSync(__dirname + '/timer.js', 'utf8'), ctx);
   assert.strictEqual(typeof ctx.PomodoroTimer.createTimer, 'function');
+});
+
+test('changing durations updates an untouched focus phase on creation and after reset', () => {
+  const t = createTimer();
+  t.setDurations({ focusMs: 60000, breakMs: 120000 });
+  assert.strictEqual(t.getState().display, '01:00');
+
+  t.start(0);
+  assert.strictEqual(t.tick(60000), 1);
+  assert.strictEqual(t.getState().display, '02:00');
+  t.reset();
+  assert.strictEqual(t.getState().display, '01:00');
+
+  t.setDurations({ focusMs: 5400000, breakMs: 60000 });
+  assert.strictEqual(t.getState().display, '90:00');
+});
+
+test('changing durations preserves running focus and paused break time', () => {
+  const t = createTimer({ focusMs: 120000, breakMs: 120000 });
+  t.start(0);
+  t.tick(30000);
+  t.setDurations({ focusMs: 60000, breakMs: 60000 });
+  assert.strictEqual(t.getState().remainingMs, 90000);
+
+  assert.strictEqual(t.tick(120000), 1);
+  t.pause(135000);
+  assert.strictEqual(t.getState().phase, 'break');
+  assert.strictEqual(t.getState().remainingMs, 45000);
+
+  t.setDurations({ focusMs: 180000, breakMs: 240000 });
+  assert.strictEqual(t.getState().remainingMs, 45000);
+  t.start(200000);
+  assert.strictEqual(t.tick(245000), 1);
+  assert.strictEqual(t.getState().remainingMs, 180000);
+  assert.strictEqual(t.tick(425000), 1);
+  assert.strictEqual(t.getState().remainingMs, 240000);
+  t.reset();
+  assert.strictEqual(t.getState().remainingMs, 180000);
+});
+
+test('starting then immediately pausing still preserves the current duration', () => {
+  const t = createTimer();
+  t.start(0);
+  t.pause(0);
+  t.setDurations({ focusMs: 60000, breakMs: 60000 });
+  assert.strictEqual(t.getState().remainingMs, FOCUS_MS);
+});
+
+test('setting a nonpositive duration leaves the duration pair intact', () => {
+  const t = createTimer();
+  t.setDurations({ focusMs: 60000, breakMs: 0 });
+  assert.strictEqual(t.getState().remainingMs, FOCUS_MS);
+  t.start(0);
+  assert.strictEqual(t.tick(FOCUS_MS), 1);
+  assert.strictEqual(t.getState().remainingMs, BREAK_MS);
+});
+
+test('counts focus completions for no switches and odd or even switches from either phase', () => {
+  assert.deepStrictEqual([0, 1, 2, 3, 4].map(n => countFocusCompletions('focus', n)), [0, 1, 1, 2, 2]);
+  assert.deepStrictEqual([0, 1, 2, 3, 4].map(n => countFocusCompletions('break', n)), [0, 0, 1, 1, 2]);
 });
