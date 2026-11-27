@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>25:00 – Focus</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="card">
+    <h1 class="visually-hidden">Focus Timer</h1>
+    <p id="phase" class="phase" data-phase="focus">Focus</p>
+    <!-- Not a live region: the countdown must not be announced every second. -->
+    <div id="countdown" class="countdown" role="timer" aria-live="off" aria-label="Time remaining">25:00</div>
+    <div class="controls">
+      <button id="toggle" type="button" class="btn btn-primary">Start</button>
+      <button id="reset" type="button" class="btn">Reset</button>
+    </div>
+    <!-- Announces phase changes only. -->
+    <p id="status" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></p>
+  </main>
+  <script src="timer.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
