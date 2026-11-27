@@ -19,6 +19,10 @@
     return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
   }
 
+  function countFocusCompletions(phaseBeforeTick, switches) {
+    return phaseBeforeTick === 'focus' ? Math.ceil(switches / 2) : Math.floor(switches / 2);
+  }
+
   function createTimer(options) {
     options = options || {};
     var durations = {
@@ -28,6 +32,7 @@
     var phase = 'focus';
     var remaining = durations.focus;
     var running = false;
+    var hasStarted = false;
     var lastTs = 0;
 
     // Advance by the time elapsed since the last timestamp. Elapsed time is
@@ -51,6 +56,7 @@
       start: function (now) {
         if (running) return;
         running = true;
+        hasStarted = true;
         lastTs = now;
       },
       pause: function (now) {
@@ -62,6 +68,16 @@
         phase = 'focus';
         remaining = durations.focus;
         running = false;
+        hasStarted = false;
+      },
+      setDurations: function (options) {
+        var focusMs = options.focusMs;
+        var breakMs = options.breakMs;
+        if (!Number.isFinite(focusMs) || focusMs <= 0 ||
+            !Number.isFinite(breakMs) || breakMs <= 0) return;
+        durations.focus = focusMs;
+        durations.break = breakMs;
+        if (!hasStarted) remaining = durations.focus;
       },
       tick: tick,
       getState: function () {
@@ -79,6 +95,7 @@
     FOCUS_MS: FOCUS_MS,
     BREAK_MS: BREAK_MS,
     createTimer: createTimer,
-    formatTime: formatTime
+    formatTime: formatTime,
+    countFocusCompletions: countFocusCompletions
   };
 });
