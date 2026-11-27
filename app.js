@@ -45,6 +45,7 @@
     reset: document.getElementById('reset'),
     status: document.getElementById('status'),
     dailyCount: document.getElementById('daily-count'),
+    settings: document.getElementById('settings'),
     settingsForm: document.getElementById('settings-form'),
     focusMinutes: document.getElementById('focus-minutes'),
     breakMinutes: document.getElementById('break-minutes'),
@@ -203,7 +204,7 @@
     if (intervalId !== null) { clearInterval(intervalId); intervalId = null; }
   }
 
-  els.toggle.addEventListener('click', function () {
+  function toggleTimer() {
     if (timer.getState().running) {
       var now = Date.now();
       advance(now);
@@ -221,13 +222,29 @@
       startLoop();
     }
     render();
-  });
+  }
 
-  els.reset.addEventListener('click', function () {
+  function resetTimer() {
     timer.reset();
     stopLoop();
     setStatus('', false);
     render();
+  }
+
+  els.toggle.addEventListener('click', toggleTimer);
+  els.reset.addEventListener('click', resetTimer);
+
+  document.addEventListener('keydown', function (event) {
+    var action = PomodoroShortcuts.actionFor(event);
+    if (action === null) return;
+    event.preventDefault();
+
+    if (action === 'toggle') toggleTimer();
+    else if (action === 'reset') resetTimer();
+    else if (action === 'settings') {
+      els.settings.open = true;
+      els.focusMinutes.focus();
+    }
   });
 
   document.addEventListener('visibilitychange', function () {

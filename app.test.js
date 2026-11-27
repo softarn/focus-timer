@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const { loadSettings } = require('./settings.js');
 
-const scripts = ['timer.js', 'settings.js', 'app.js'].map(file => fs.readFileSync(__dirname + '/' + file, 'utf8'));
+const scripts = ['timer.js', 'settings.js', 'shortcuts.js', 'app.js'].map(file => fs.readFileSync(__dirname + '/' + file, 'utf8'));
 const minute = 60000;
 
 function memoryStorage() {
@@ -39,6 +39,8 @@ function openPage(startTime, getStorage) {
       Object.defineProperty(element, 'valueAsNumber', {
         get: () => element.value === '' ? NaN : Number(element.value)
       });
+      if (id === 'focus-minutes' || id === 'break-minutes') element.tagName = 'INPUT';
+      if (id === 'settings') element.open = false;
       elements.set(id, element);
     }
     return elements.get(id);
@@ -62,6 +64,12 @@ function openPage(startTime, getStorage) {
   return {
     get,
     activeElement: () => document.activeElement,
+    keydown(key) {
+      const event = Object.assign(new Event('keydown', { cancelable: true }), { key });
+      Object.defineProperty(event, 'target', { value: document.activeElement || document });
+      document.dispatchEvent(event);
+      return event.defaultPrevented;
+    },
     submit(focus, rest) {
       get('focus-minutes').value = focus;
       get('break-minutes').value = rest;
@@ -164,5 +172,54 @@ test('durations and the counter work while storage access or writes are blocked'
     assert.equal(page.get('daily-count').textContent, 'Today: 1 focus session');
     page.tick(start + 4 * minute);
     assert.equal(page.get('daily-count').textContent, 'Today: 2 focus sessions');
+  }
+});
+
+test('Space starts and pauses the timer and prevents the default action', () => {
+  const start = new Date(2026, 10, 27, 12).getTime();
+  const page = openPage(start, memoryStorage);
+
+  assert.equal(page.keydown(' '), true);
+  assert.equal(page.get('toggle').textContent, 'Pause');
+  page.tick(start + 1000);
+  assert.equal(page.keydown(' '), true);
+  assert.equal(page.get('toggle').textContent, 'Start');
+  assert.equal(page.get('countdown').textContent, '24:59');
+});
+
+test('R resets the timer and prevents the default action', () => {
+  const start = new Date(2026, 10, 27, 12).getTime();
+  const page = openPage(start, memoryStorage);
+  page.toggle();
+  page.tick(start + 1000);
+
+  assert.equal(page.keydown('R'), true);
+  assert.equal(page.get('toggle').textContent, 'Start');
+  assert.equal(page.get('countdown').textContent, '25:00');
+});
+
+test('S opens Settings, focuses Focus minutes and prevents the default action', () => {
+  const page = openPage(new Date(2026, 10, 27, 12).getTime(), memoryStorage);
+  assert.equal(page.get('settings').open, false);
+
+  assert.equal(page.keydown('S'), true);
+  assert.equal(page.get('settings').open, true);
+  assert.equal(page.activeElement(), page.get('focus-minutes'));
+});
+
+test('shortcut keys leave the timer and focus alone while typing in an input', () => {
+  const start = new Date(2026, 10, 27, 12).getTime();
+  const page = openPage(start, memoryStorage);
+  page.toggle();
+  page.tick(start + 1000);
+  page.keydown('s');
+  const input = page.get('break-minutes');
+  input.focus();
+
+  for (const key of [' ', 'r', 's', '?']) {
+    assert.equal(page.keydown(key), false, key);
+    assert.equal(page.get('toggle').textContent, 'Pause');
+    assert.equal(page.get('countdown').textContent, '24:59');
+    assert.equal(page.activeElement(), input);
   }
 });
