@@ -622,7 +622,7 @@ test('only a valid settings pair changes the timer and survives reload', () => {
   const page = openPage(now, () => storage);
   page.submit('90', '1');
   assert.equal(page.get('countdown').textContent, '90:00');
-  assert.equal(page.get('status').textContent, 'Durations updated.');
+  assert.equal(page.get('status').textContent, 'Settings saved.');
   page.runTimeouts(now + 3000);
   assert.equal(page.get('status').textContent, '');
 
@@ -712,16 +712,24 @@ test('reaching the daily goal is visible and announced once per local day', () =
   page.tick(start + 9 * minute);
   assert.equal(page.get('daily-count').textContent, 'Today: 5 of 6');
   assert.deepEqual(goalWrites(page), []);
+  page.setHidden(true);
   page.tick(start + 11 * minute);
   assert.equal(page.get('daily-count').textContent, 'Today: 6 of 6');
   assert.equal(status.textContent, goalReached);
   assert.equal(status.classList.contains('visually-hidden'), false);
-  assert.equal(page.notifications.at(-1), 'Focus complete. Time for a break.');
+  const goalNotification = 'Focus complete. ' + goalReached + '.';
+  assert.equal(page.notifications.at(-1), goalNotification);
 
-  page.runTimeouts(start + 11 * minute + 3000);
-  assert.equal(status.textContent, '');
+  page.runTimeouts(start + 11 * minute + 4000);
+  page.setHidden(false);
+  assert.equal(status.textContent, goalReached);
+  assert.equal(status.classList.contains('visually-hidden'), false);
   page.tick(start + 13 * minute);
   assert.equal(page.get('daily-count').textContent, 'Today: 7 of 6');
+  assert.equal(status.textContent, goalReached);
+  assert.deepEqual(page.notifications.filter(text => text === goalNotification), [goalNotification]);
+  page.submit('1', '1');
+  assert.equal(status.textContent, 'Settings saved.');
   assert.deepEqual(goalWrites(page), [goalReached]);
 
   const reloaded = openPage(start + 13 * minute, () => storage);
@@ -742,6 +750,24 @@ test('reaching the daily goal is visible and announced once per local day', () =
   assert.equal(reloaded.get('daily-count').textContent, 'Today: 8 of 8');
   assert.equal(reloaded.get('status').textContent, goalReached);
   assert.deepEqual(goalWrites(reloaded), [goalReached]);
+});
+
+test('timer controls dismiss a goal message that is already visible', () => {
+  const start = new Date(2026, 10, 27, 12).getTime();
+  const actions = [
+    [page => page.toggle(), ''],
+    [page => page.get('reset').dispatchEvent(new Event('click')), ''],
+    [page => page.skipBreak(), 'Break skipped. Time to focus.']
+  ];
+  for (const [act, expectedStatus] of actions) {
+    const page = openPage(start, memoryStorage);
+    page.submit('1', '1', '1');
+    page.toggle();
+    page.tick(start + minute);
+    assert.equal(page.get('status').textContent, goalReached);
+    act(page);
+    assert.equal(page.get('status').textContent, expectedStatus);
+  }
 });
 
 test('a late tick can cross the goal once and an immediate phase change preserves the message', () => {

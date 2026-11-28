@@ -13,7 +13,7 @@ Open `index.html` directly in a browser (double-click it or use `file://`).
 - Press **?** or select **Keyboard shortcuts** to open the shortcut list. Press **Escape** or select **Close** to dismiss it.
 - Open **Settings** to set **Focus minutes** and **Break minutes** to whole numbers from 1 to 90, then select **Save**. The browser remembers them when local storage is available. A focus or break already in progress keeps its remaining time.
 - Set an optional **Daily goal** from 1 to 24 whole focus sessions in **Settings**. Leave the field blank to clear the goal. The browser remembers the saved goal when local storage is available.
-- **Today** counts completed focus sessions and shows progress as **Today: 2 of 6** when you set a goal. The count resets at local midnight and is remembered across reloads when local storage is available. When a completed session first brings the count to the goal that day, the page shows **Goal reached — nice work**.
+- **Today** counts completed focus sessions and shows progress as **Today: 2 of 6** when you set a goal. The count resets at local midnight and is remembered across reloads when local storage is available. When a completed session first brings the count to the goal that day, the page shows **Goal reached — nice work** until you use a timer control or save settings. If notifications are enabled, the completion notification includes the message.
 - When a phase ends, a soft chime plays and, if you allowed it, a notification appears.
   Notification permission is requested only when you first press Start; the timer works without it.
 - Screen readers hear phase changes, settings confirmations and the daily goal message. The countdown updates silently.

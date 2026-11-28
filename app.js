@@ -94,18 +94,22 @@
     midnightTimeoutId = setTimeout(refreshToday, nextMidnight.getTime() - now);
   }
 
-  function setStatus(text, show) {
+  function setStatus(text, show, hideAfterMs) {
     clearTimeout(statusTimeoutId);
     els.status.classList.toggle('visually-hidden', !show);
     els.status.textContent = text;
-    if (show) {
-      statusTimeoutId = setTimeout(function () { setStatus('', false); }, 3000);
+    if (hideAfterMs) {
+      statusTimeoutId = setTimeout(function () { setStatus('', false); }, hideAfterMs);
     }
   }
 
   function setPhaseStatus(text) {
-    // Let the goal message finish even if a late tick or Skip break changes phase again.
+    // Keep the goal message visible across automatic transitions.
     if (els.status.textContent !== GOAL_REACHED) setStatus(text, false);
+  }
+
+  function dismissGoalStatus() {
+    if (els.status.textContent === GOAL_REACHED) setStatus('', false);
   }
 
   function validateNumber(input, error, label, optional) {
@@ -137,7 +141,6 @@
     }
     var settings = { focusMinutes: els.focusMinutes.valueAsNumber, breakMinutes: els.breakMinutes.valueAsNumber };
     var goal = els.dailyGoal.value === '' ? null : els.dailyGoal.valueAsNumber;
-    var goalChanged = dailyGoal !== goal;
     PomodoroSettings.saveSettings(storage, settings);
     PomodoroSettings.saveDailyGoal(storage, goal);
     dailyGoal = goal;
@@ -145,7 +148,7 @@
     timer.setDurations(durations);
     render();
     refreshToday();
-    setStatus(goalChanged ? 'Settings saved.' : 'Durations updated.', true);
+    setStatus('Settings saved.', true, 3000);
   });
 
   function chime() {
@@ -189,11 +192,12 @@
     } catch (e) { /* ignore */ }
   }
 
-  function onPhaseEnd(phase) {
+  function onPhaseEnd(phase, goalReached) {
     var text = phase === 'break' ? 'Focus complete. Time for a break.' : 'Break over. Time to focus.';
-    setPhaseStatus(text);
+    if (goalReached) setStatus(GOAL_REACHED, true);
+    else setPhaseStatus(text);
     chime();
-    notify(text);
+    notify(goalReached ? 'Focus complete. ' + GOAL_REACHED + '.' : text);
   }
 
   function advance(now) {
@@ -203,6 +207,7 @@
 
     var state = timer.getState();
     var completions = PomodoroTimer.countFocusCompletions(previousPhase, switches);
+    var goalReached = false;
     if (completions > 0) {
       // Walk back from the most recent focus completion and stop at local midnight.
       var completedAt = now + state.remainingMs - durations.breakMs;
@@ -219,10 +224,10 @@
       if (dailyGoal !== null && previousCount < dailyGoal && count >= dailyGoal &&
           !PomodoroSettings.hasShownGoalToday(storage, now)) {
         PomodoroSettings.recordGoalShown(storage, now);
-        setStatus(GOAL_REACHED, true);
+        goalReached = true;
       }
     }
-    onPhaseEnd(state.phase);
+    onPhaseEnd(state.phase, goalReached);
   }
 
   function loop() {
@@ -238,6 +243,7 @@
   }
 
   function toggleTimer() {
+    dismissGoalStatus();
     if (timer.getState().running) {
       var now = Date.now();
       advance(now);
@@ -265,6 +271,8 @@
   }
 
   function skipBreak() {
+    // Dismiss an earlier message before advance can reach a new goal.
+    dismissGoalStatus();
     var now = Date.now();
     advance(now);
     if (timer.getState().phase === 'break') {
