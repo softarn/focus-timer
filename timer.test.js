@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
-const { createTimer, formatTime, countFocusCompletions, FOCUS_MS, BREAK_MS } = require('./timer.js');
+const { createTimer, formatTime, formatTitle, countFocusCompletions, FOCUS_MS, BREAK_MS } = require('./timer.js');
 
 test('initial state is idle focus with 25:00', () => {
   const s = createTimer().getState();
@@ -139,6 +139,48 @@ test('starting then immediately pausing still preserves the current duration', (
   t.pause(0);
   t.setDurations({ focusMs: 60000, breakMs: 60000 });
   assert.strictEqual(t.getState().remainingMs, FOCUS_MS);
+});
+
+test('hasStarted stays set through pause and duration changes until reset', () => {
+  const t = createTimer();
+  assert.strictEqual(t.getState().hasStarted, false);
+  t.setDurations({ focusMs: 60000, breakMs: 120000 });
+  assert.strictEqual(t.getState().hasStarted, false);
+  t.pause(0);
+  assert.strictEqual(t.getState().hasStarted, false);
+
+  t.start(0);
+  assert.strictEqual(t.getState().hasStarted, true);
+  t.setDurations({ focusMs: 120000, breakMs: 60000 });
+  assert.strictEqual(t.getState().hasStarted, true);
+  t.pause(0);
+  assert.strictEqual(t.getState().hasStarted, true);
+  t.setDurations({ focusMs: 180000, breakMs: 120000 });
+  assert.strictEqual(t.getState().hasStarted, true);
+
+  t.reset();
+  assert.strictEqual(t.getState().hasStarted, false);
+  t.setDurations({ focusMs: 240000, breakMs: 180000 });
+  assert.strictEqual(t.getState().hasStarted, false);
+  t.start(1000);
+  assert.strictEqual(t.getState().hasStarted, true);
+});
+
+test('formatTitle shows the rounded countdown and phase once started', () => {
+  assert.strictEqual(formatTitle({ hasStarted: false, remainingMs: FOCUS_MS, phase: 'focus' }), 'Focus Timer');
+
+  const state = { hasStarted: true, running: false };
+  for (const [phase, remainingMs, title] of [
+    ['focus', FOCUS_MS, '25:00 · Focus'],
+    ['focus', 753001, '12:34 · Focus'],
+    ['break', BREAK_MS - 1000, '4:59 · Break'],
+    ['break', 59001, '1:00 · Break'],
+    ['break', 1, '0:01 · Break'],
+    ['break', 0, '0:00 · Break'],
+    ['break', -50, '0:00 · Break']
+  ]) {
+    assert.strictEqual(formatTitle({ ...state, phase, remainingMs }), title);
+  }
 });
 
 test('setting a nonpositive duration leaves the duration pair intact', () => {

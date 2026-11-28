@@ -19,6 +19,12 @@
     return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
   }
 
+  function formatTitle(state) {
+    if (!state.hasStarted) return 'Focus Timer';
+    var time = formatTime(state.remainingMs).replace(/^0/, '');
+    return time + ' · ' + (state.phase === 'focus' ? 'Focus' : 'Break');
+  }
+
   function countFocusCompletions(phaseBeforeTick, switches) {
     return phaseBeforeTick === 'focus' ? Math.ceil(switches / 2) : Math.floor(switches / 2);
   }
@@ -84,6 +90,7 @@
         return {
           phase: phase,
           running: running,
+          hasStarted: hasStarted,
           remainingMs: remaining,
           display: formatTime(remaining)
         };
@@ -96,6 +103,7 @@
     BREAK_MS: BREAK_MS,
     createTimer: createTimer,
     formatTime: formatTime,
+    formatTitle: formatTitle,
     countFocusCompletions: countFocusCompletions
   };
 });

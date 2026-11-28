@@ -68,7 +68,8 @@
     els.phase.setAttribute('data-phase', s.phase);
     els.countdown.textContent = s.display;
     els.toggle.textContent = s.running ? 'Pause' : 'Start';
-    document.title = s.display + ' – ' + LABELS[s.phase];
+    var title = PomodoroTimer.formatTitle(s);
+    if (document.title !== title) document.title = title;
   }
 
   function renderCount(now) {

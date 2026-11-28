@@ -15,7 +15,7 @@ Open `index.html` directly in a browser (double-click it or use `file://`).
 - When a phase ends, a soft chime plays and, if you allowed it, a notification appears.
   Notification permission is requested only when you first press Start; the timer works without it.
 - Screen readers hear phase changes and settings confirmations. The countdown updates silently.
-- The browser tab title shows the remaining time.
+- The browser tab title shows the remaining time and phase once you start, including while paused. It reads **Focus Timer** before you start and after you reset.
 - Light and dark themes follow your system setting.
 
 ## Files
