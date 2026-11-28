@@ -8,6 +8,7 @@ const { loadSettings } = require('./settings.js');
 const scripts = ['timer.js', 'settings.js', 'shortcuts.js', 'app.js'].map(file => fs.readFileSync(__dirname + '/' + file, 'utf8'));
 const html = fs.readFileSync(__dirname + '/index.html', 'utf8');
 const initialTitle = html.match(/<title>([^<]*)<\/title>/)[1];
+const skipBreakMarkup = html.match(/<button\b[^>]*\bid="skip-break"[^>]*>Skip break<\/button>/)?.[0];
 const minute = 60000;
 
 function memoryStorage() {
@@ -24,6 +25,8 @@ function openPage(startTime, getStorage) {
   let nextId = 0;
   const timeouts = new Map();
   const elements = new Map();
+  const notifications = [];
+  let notesPlayed = 0;
   const document = new EventTarget();
   document.hidden = false;
   let title = initialTitle;
@@ -52,7 +55,7 @@ function openPage(startTime, getStorage) {
         get: () => element.value === '' ? NaN : Number(element.value)
       });
       if (id === 'focus-minutes' || id === 'break-minutes') element.tagName = 'INPUT';
-      if (['toggle', 'reset', 'shortcuts-trigger', 'shortcuts-close'].includes(id)) element.tagName = 'BUTTON';
+      if (['toggle', 'reset', 'skip-break', 'shortcuts-trigger', 'shortcuts-close'].includes(id)) element.tagName = 'BUTTON';
       if (id === 'settings') element.open = false;
       if (id === 'shortcuts-dialog') {
         element.tagName = 'DIALOG';
@@ -72,7 +75,22 @@ function openPage(startTime, getStorage) {
   const page = vm.createContext({
     document,
     Date: class extends Date { static now() { return now; } },
-    window: { get localStorage() { return getStorage(); } },
+    window: {
+      get localStorage() { return getStorage(); },
+      AudioContext: class {
+        currentTime = 0;
+        createOscillator() {
+          return { frequency: {}, connect() {}, start() { notesPlayed++; }, stop() {} };
+        }
+        createGain() {
+          return { gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {} };
+        }
+      }
+    },
+    Notification: class {
+      static permission = 'granted';
+      constructor(title, { body }) { notifications.push(body); }
+    },
     setInterval: callback => { interval = callback; return 1; },
     clearInterval: () => { interval = undefined; },
     setTimeout(callback, delay) {
@@ -88,6 +106,8 @@ function openPage(startTime, getStorage) {
     get,
     get title() { return document.title; },
     get titleWrites() { return writtenTitles.length; },
+    get notesPlayed() { return notesPlayed; },
+    notifications,
     writtenTitles,
     activeElement: () => document.activeElement,
     keydown(key) {
@@ -108,6 +128,10 @@ function openPage(startTime, getStorage) {
     toggle(at = now) {
       now = at;
       get('toggle').dispatchEvent(new Event('click'));
+    },
+    skipBreak(at = now) {
+      now = at;
+      get('skip-break').dispatchEvent(new Event('click'));
     },
     tick(at) {
       now = at;
@@ -192,6 +216,310 @@ test('resetting during a running break restores the default tab title', () => {
 
   page.get('reset').dispatchEvent(new Event('click'));
   assertTitle(page, 'Focus Timer');
+});
+
+test('Skip break is hidden before scripts run and only appears during a break', () => {
+  const start = new Date(2026, 10, 27, 12).getTime();
+  const page = openPage(start, memoryStorage);
+  const skipBreak = page.get('skip-break');
+  assert.match(skipBreakMarkup, /\shidden>/);
+  assert.equal(skipBreak.hidden, true);
+
+  page.toggle();
+  assert.equal(skipBreak.hidden, true);
+  page.tick(start + 25 * minute);
+  assert.equal(skipBreak.hidden, false);
+  page.toggle();
+  assert.equal(page.get('toggle').textContent, 'Start');
+  assert.equal(skipBreak.hidden, false);
+
+  page.get('reset').dispatchEvent(new Event('click'));
+  assert.equal(skipBreak.hidden, true);
+});
+
+for (const paused of [false, true]) {
+  test(`skipping a ${paused ? 'paused' : 'running'} break starts a full focus session without alerts`, () => {
+    const start = new Date(2026, 10, 27, 12).getTime();
+    const page = openPage(start, memoryStorage);
+    const skipBreak = page.get('skip-break');
+    const breakStart = start + 7 * minute;
+    page.submit('7', '3');
+    page.toggle();
+    page.tick(breakStart);
+    if (paused) page.toggle();
+    skipBreak.focus();
+    assert.equal(page.keydown(' '), false);
+    assert.equal(page.get('daily-count').textContent, 'Today: 1 focus session');
+
+    const clickTime = breakStart + 10000;
+    page.skipBreak(clickTime);
+    assert.equal(skipBreak.hidden, true);
+    assert.equal(page.get('phase').textContent, 'Focus');
+    assert.equal(page.get('countdown').textContent, '07:00');
+    assert.equal(page.get('toggle').textContent, 'Pause');
+    assertTitle(page, '7:00 · Focus');
+    assert.equal(page.get('daily-count').textContent, 'Today: 1 focus session');
+    assert.equal(page.get('status').textContent, 'Break skipped. Time to focus.');
+    assert.equal(page.activeElement(), page.get('toggle'));
+    assert.equal(page.notesPlayed, 2);
+    assert.deepEqual(page.notifications, ['Focus complete. Time for a break.']);
+
+    page.tick(clickTime + 1000);
+    assert.equal(page.get('countdown').textContent, '06:59');
+  });
+}
+
+test('clicking Skip break after the break expires handles the normal transition', () => {
+  const start = new Date(2026, 10, 27, 12).getTime();
+  const page = openPage(start, memoryStorage);
+  page.submit('1', '1');
+  page.toggle();
+  page.tick(start + minute);
+  assert.equal(page.get('skip-break').hidden, false);
+
+  // The button is still on screen because the interval has not fired again.
+  page.skipBreak(start + 2 * minute + 1000);
+  assert.equal(page.get('skip-break').hidden, true);
+  assertTitle(page, '0:59 · Focus');
+  assert.equal(page.get('status').textContent, 'Break over. Time to focus.');
+  assert.equal(page.get('daily-count').textContent, 'Today: 1 focus session');
+  assert.equal(page.notesPlayed, 4);
+  assert.deepEqual(page.notifications, ['Focus complete. Time for a break.', 'Break over. Time to focus.']);
+  assert.equal(page.activeElement(), page.get('toggle'));
+});
+
+test('a late Skip break press keeps the running focus session and later presses change nothing', () => {
+  const start = new Date(2026, 10, 27, 12).getTime();
+  const page = openPage(start, memoryStorage);
+  page.submit('1', '1');
+  page.toggle();
+  page.tick(start + minute);
+  assert.equal(page.get('daily-count').textContent, 'Today: 1 focus session');
+
+  // The break ended at start + 2 min; the interval has not fired since.
+  page.skipBreak(start + 2 * minute + 1000);
+  assert.equal(page.get('phase').textContent, 'Focus');
+  assert.equal(page.get('countdown').textContent, '00:59');
+  assert.equal(page.get('daily-count').textContent, 'Today: 1 focus session');
+
+  // A second press (for example a double click) must not restart focus.
+  page.skipBreak(start + 2 * minute + 2000);
+  assert.equal(page.get('skip-break').hidden, true);
+  assert.equal(page.get('countdown').textContent, '00:58');
+  assert.equal(page.get('status').textContent, 'Break over. Time to focus.');
+  assert.equal(page.get('daily-count').textContent, 'Today: 1 focus session');
+  assert.equal(page.notifications.length, 2);
+
+  page.tick(start + 3 * minute);
+  assert.equal(page.get('phase').textContent, 'Break');
+  assert.equal(page.get('daily-count').textContent, 'Today: 2 focus sessions');
+  page.tick(start + 3 * minute + 250);
+  assert.equal(page.get('daily-count').textContent, 'Today: 2 focus sessions');
+  assert.equal(page.notifications.length, 3);
+});
+
+test('a press long after the break counts the unattended focus session once', () => {
+  const start = new Date(2026, 10, 27, 12).getTime();
+  const page = openPage(start, memoryStorage);
+  page.submit('1', '1');
+  page.toggle();
+  page.tick(start + minute);
+
+  // Break ended at +2 min, the next focus at +3 min; now 30 s into a new break.
+  const pressTime = start + 3 * minute + 30000;
+  page.skipBreak(pressTime);
+  assert.equal(page.get('daily-count').textContent, 'Today: 2 focus sessions');
+  assert.equal(page.get('phase').textContent, 'Focus');
+  assert.equal(page.get('countdown').textContent, '01:00');
+  assert.equal(page.get('status').textContent, 'Break skipped. Time to focus.');
+
+  page.tick(pressTime + minute - 1);
+  assert.equal(page.get('daily-count').textContent, 'Today: 2 focus sessions');
+  page.tick(pressTime + minute);
+  assert.equal(page.get('daily-count').textContent, 'Today: 3 focus sessions');
+});
+
+test('Skip break at the exact break deadline is the normal transition, one ms earlier is a skip', () => {
+  const start = new Date(2026, 10, 27, 12).getTime();
+  const breakEnd = start + 2 * minute;
+  for (const [pressTime, status, alerts] of [
+    [breakEnd, 'Break over. Time to focus.', 2],
+    [breakEnd - 1, 'Break skipped. Time to focus.', 1]
+  ]) {
+    const page = openPage(start, memoryStorage);
+    page.submit('1', '1');
+    page.toggle();
+    page.tick(start + minute);
+
+    page.skipBreak(pressTime);
+    assert.equal(page.get('phase').textContent, 'Focus');
+    assert.equal(page.get('countdown').textContent, '01:00');
+    assertTitle(page, '1:00 · Focus');
+    assert.equal(page.get('status').textContent, status);
+    assert.equal(page.notifications.length, alerts);
+    assert.equal(page.get('daily-count').textContent, 'Today: 1 focus session');
+
+    page.tick(pressTime + minute - 1);
+    assert.equal(page.get('phase').textContent, 'Focus');
+    assert.equal(page.get('daily-count').textContent, 'Today: 1 focus session');
+    page.tick(pressTime + minute);
+    assert.equal(page.get('phase').textContent, 'Break');
+    assert.equal(page.get('daily-count').textContent, 'Today: 2 focus sessions');
+  }
+});
+
+test('skipping a break that stayed paused past its deadline starts a full focus session', () => {
+  const start = new Date(2026, 10, 27, 12).getTime();
+  const page = openPage(start, memoryStorage);
+  page.submit('1', '1');
+  page.toggle();
+  page.tick(start + minute);
+  page.toggle(start + minute + 20000);
+  assert.equal(page.get('countdown').textContent, '00:40');
+
+  // Far more wall-clock time than the break and a whole cycle have passed.
+  const pressTime = start + 15 * minute;
+  page.skipBreak(pressTime);
+  assert.equal(page.get('phase').textContent, 'Focus');
+  assert.equal(page.get('countdown').textContent, '01:00');
+  assert.equal(page.get('toggle').textContent, 'Pause');
+  assert.equal(page.get('status').textContent, 'Break skipped. Time to focus.');
+  assert.equal(page.get('daily-count').textContent, 'Today: 1 focus session');
+  assert.deepEqual(page.notifications, ['Focus complete. Time for a break.']);
+
+  page.tick(pressTime + minute);
+  assert.equal(page.get('daily-count').textContent, 'Today: 2 focus sessions');
+  assertTitle(page, '1:00 · Break');
+});
+
+for (const paused of [false, true]) {
+  test(`Reset after skipping a ${paused ? 'paused' : 'running'} break hides the button and restores the title`, () => {
+    const start = new Date(2026, 10, 27, 12).getTime();
+    const page = openPage(start, memoryStorage);
+    const skipBreak = page.get('skip-break');
+    page.submit('1', '1');
+    page.toggle();
+    page.tick(start + minute);
+    if (paused) page.toggle(start + minute + 5000);
+    page.skipBreak(start + minute + 10000);
+    page.tick(start + minute + 20000);
+    assertTitle(page, '0:50 · Focus');
+
+    page.get('reset').dispatchEvent(new Event('click'));
+    assert.equal(skipBreak.hidden, true);
+    assertTitle(page, 'Focus Timer');
+    assert.equal(page.get('phase').textContent, 'Focus');
+    assert.equal(page.get('countdown').textContent, '01:00');
+    assert.equal(page.get('toggle').textContent, 'Start');
+    assert.equal(page.get('status').textContent, '');
+    assert.equal(page.get('daily-count').textContent, 'Today: 1 focus session');
+
+    // A stray press after Reset does nothing, and a new session starts cleanly.
+    page.skipBreak(start + 5 * minute);
+    assert.equal(page.get('toggle').textContent, 'Start');
+    assertTitle(page, 'Focus Timer');
+    page.toggle(start + 10 * minute);
+    page.tick(start + 11 * minute);
+    assert.equal(page.get('daily-count').textContent, 'Today: 2 focus sessions');
+    assert.equal(skipBreak.hidden, false);
+  });
+}
+
+for (const paused of [false, true]) {
+  test(`durations saved during a ${paused ? 'paused' : 'running'} break apply to the skipped-into focus session`, () => {
+    const start = new Date(2026, 10, 27, 12).getTime();
+    const page = openPage(start, memoryStorage);
+    page.submit('1', '1');
+    page.toggle();
+    page.tick(start + minute);
+    if (paused) page.toggle(start + minute + 5000);
+    page.submit('3', '2');
+    // The current break keeps its remaining time until skipped.
+    assert.equal(page.get('phase').textContent, 'Break');
+    assert.equal(page.get('countdown').textContent, paused ? '00:55' : '01:00');
+
+    const skipTime = start + minute + 10000;
+    page.skipBreak(skipTime);
+    assert.equal(page.get('countdown').textContent, '03:00');
+    assertTitle(page, '3:00 · Focus');
+    assert.equal(page.get('daily-count').textContent, 'Today: 1 focus session');
+
+    page.tick(skipTime + 3 * minute - 1);
+    assertTitle(page, '0:01 · Focus');
+    assert.equal(page.get('daily-count').textContent, 'Today: 1 focus session');
+    page.tick(skipTime + 3 * minute);
+    assertTitle(page, '2:00 · Break');
+    assert.equal(page.get('daily-count').textContent, 'Today: 2 focus sessions');
+
+    // A late tick across two more 3 + 2 minute cycles counts each focus once.
+    page.tick(skipTime + 13 * minute + 10000);
+    assertTitle(page, '1:50 · Break');
+    assert.equal(page.get('daily-count').textContent, 'Today: 4 focus sessions');
+  });
+}
+
+test('a focus session skipped into before midnight counts on the day it completes', () => {
+  const midnight = new Date(2026, 10, 28).getTime();
+  const countEntry = storage => JSON.parse(storage.getItem('focus-timer.daily-count'));
+
+  for (const [skipTime, completedBeforeMidnight] of [[midnight - 70000, true], [midnight - 10000, false]]) {
+    const storage = memoryStorage();
+    // The first focus session ends 10 seconds before the skip.
+    const breakStart = skipTime - 10000;
+    const page = openPage(breakStart - minute, () => storage);
+    page.submit('1', '1');
+    page.toggle();
+    page.tick(breakStart);
+    assert.equal(page.get('phase').textContent, 'Break');
+    assert.deepEqual(countEntry(storage), { date: '2026-11-27', count: 1 });
+    assert.equal(page.get('daily-count').textContent, 'Today: 1 focus session');
+
+    page.skipBreak(skipTime);
+    assert.equal(page.get('daily-count').textContent, 'Today: 1 focus session');
+    assert.deepEqual(countEntry(storage), { date: '2026-11-27', count: 1 });
+
+    if (completedBeforeMidnight) {
+      page.tick(skipTime + minute);
+      assert.equal(page.get('daily-count').textContent, 'Today: 2 focus sessions');
+      assert.deepEqual(countEntry(storage), { date: '2026-11-27', count: 2 });
+      page.runTimeouts(midnight);
+      assert.equal(page.get('daily-count').textContent, 'Today: 0 focus sessions');
+    } else {
+      page.runTimeouts(midnight);
+      assert.equal(page.get('daily-count').textContent, 'Today: 0 focus sessions');
+      page.tick(skipTime + minute - 1);
+      assert.equal(page.get('daily-count').textContent, 'Today: 0 focus sessions');
+      page.tick(skipTime + minute);
+      assert.equal(page.get('daily-count').textContent, 'Today: 1 focus session');
+      assert.deepEqual(countEntry(storage), { date: '2026-11-28', count: 1 });
+    }
+  }
+});
+
+test('a late tick spanning midnight after a skip counts only the sessions that ended after midnight', () => {
+  const midnight = new Date(2026, 10, 28).getTime();
+  // Skipped focus ends at 23:59:50 (first case) or 00:00:50 (second case).
+  for (const [skipTime, tickTime, title, todayCount] of [
+    [midnight - 70000, midnight + 165000, '0:05 · Break', 1],
+    [midnight - 10000, midnight + 175000, '0:55 · Break', 2]
+  ]) {
+    const storage = memoryStorage();
+    // The first focus session ends 10 seconds before the skip.
+    const breakStart = skipTime - 10000;
+    const page = openPage(breakStart - minute, () => storage);
+    page.submit('1', '1');
+    page.toggle();
+    page.tick(breakStart);
+    assert.equal(page.get('phase').textContent, 'Break');
+    page.skipBreak(skipTime);
+    assertTitle(page, '1:00 · Focus');
+
+    page.tick(tickTime);
+    assertTitle(page, title);
+    const text = 'Today: ' + todayCount + ' focus session' + (todayCount === 1 ? '' : 's');
+    assert.equal(page.get('daily-count').textContent, text);
+    assert.deepEqual(JSON.parse(storage.getItem('focus-timer.daily-count')), { date: '2026-11-28', count: todayCount });
+  }
 });
 
 test('the tab title survives saving durations while paused and returns to default on reset', () => {

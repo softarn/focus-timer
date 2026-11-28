@@ -66,6 +66,64 @@ test('focus switches to break at zero, carrying overshoot, and back', () => {
   assert.strictEqual(s.remainingMs, FOCUS_MS);
 });
 
+test('skipping a running break starts a full focus countdown from the skip time', () => {
+  const t = createTimer({ focusMs: 1000, breakMs: 500 });
+  t.start(0);
+  assert.strictEqual(t.tick(1100), 1);
+  assert.strictEqual(t.getState().phase, 'break');
+
+  const skipTime = 1300;
+  assert.strictEqual(t.skipBreak(skipTime), undefined);
+  assert.strictEqual(t.getState().phase, 'focus');
+  assert.strictEqual(t.getState().running, true);
+  assert.strictEqual(t.getState().remainingMs, 1000);
+
+  assert.strictEqual(t.tick(skipTime + 999), 0);
+  assert.strictEqual(t.getState().phase, 'focus');
+  assert.strictEqual(t.getState().remainingMs, 1);
+  assert.strictEqual(t.tick(skipTime + 1000), 1);
+  assert.strictEqual(t.getState().phase, 'break');
+  assert.strictEqual(t.getState().remainingMs, 500);
+});
+
+test('skipping a paused break starts focus at the updated duration', () => {
+  const t = createTimer({ focusMs: 1000, breakMs: 500 });
+  t.start(0);
+  t.pause(1100);
+  assert.strictEqual(t.getState().phase, 'break');
+  assert.strictEqual(t.getState().running, false);
+  t.setDurations({ focusMs: 2000, breakMs: 750 });
+
+  assert.strictEqual(t.skipBreak(5000), undefined);
+  assert.strictEqual(t.getState().phase, 'focus');
+  assert.strictEqual(t.getState().running, true);
+  assert.strictEqual(t.getState().hasStarted, true);
+  assert.strictEqual(t.getState().remainingMs, 2000);
+
+  assert.strictEqual(t.tick(5250), 0);
+  assert.strictEqual(t.getState().remainingMs, 1750);
+});
+
+test('skipping outside a break leaves idle, running, and paused focus unchanged', () => {
+  const t = createTimer();
+  const idle = t.getState();
+  assert.strictEqual(t.skipBreak(100), undefined);
+  assert.deepStrictEqual(t.getState(), idle);
+
+  t.start(200);
+  t.tick(500);
+  const running = t.getState();
+  assert.strictEqual(t.skipBreak(700), undefined);
+  assert.deepStrictEqual(t.getState(), running);
+  assert.strictEqual(t.tick(1000), 0);
+  assert.strictEqual(t.getState().remainingMs, FOCUS_MS - 800);
+
+  t.pause(1000);
+  const paused = t.getState();
+  assert.strictEqual(t.skipBreak(1500), undefined);
+  assert.deepStrictEqual(t.getState(), paused);
+});
+
 test('a very late tick crosses several phases', () => {
   const t = createTimer({ focusMs: 1000, breakMs: 500 });
   t.start(0);
