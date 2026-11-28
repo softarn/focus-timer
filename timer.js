@@ -1,5 +1,5 @@
 /* Pomodoro timer state machine. Pure and dependency-free: no DOM, no real
- * timers. Callers pass the current time (ms) into start/pause/tick. */
+ * timers. Callers pass the current time (ms) into start/pause/skipBreak/tick. */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
     module.exports = factory();
@@ -69,6 +69,13 @@
         if (!running) return;
         tick(now);
         running = false;
+      },
+      skipBreak: function (now) {
+        if (phase !== 'break') return;
+        phase = 'focus';
+        remaining = durations.focus;
+        running = true;
+        lastTs = now;
       },
       reset: function () {
         phase = 'focus';
