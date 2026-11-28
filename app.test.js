@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const { loadSettings } = require('./settings.js');
 
-const scripts = ['timer.js', 'settings.js', 'app.js'].map(file => fs.readFileSync(__dirname + '/' + file, 'utf8'));
+const scripts = ['timer.js', 'settings.js', 'shortcuts.js', 'app.js'].map(file => fs.readFileSync(__dirname + '/' + file, 'utf8'));
 const minute = 60000;
 
 function memoryStorage() {
@@ -39,6 +39,19 @@ function openPage(startTime, getStorage) {
       Object.defineProperty(element, 'valueAsNumber', {
         get: () => element.value === '' ? NaN : Number(element.value)
       });
+      if (id === 'focus-minutes' || id === 'break-minutes') element.tagName = 'INPUT';
+      if (['toggle', 'reset', 'shortcuts-trigger', 'shortcuts-close'].includes(id)) element.tagName = 'BUTTON';
+      if (id === 'settings') element.open = false;
+      if (id === 'shortcuts-dialog') {
+        element.tagName = 'DIALOG';
+        element.open = false;
+        element.showModal = () => { element.open = true; };
+        element.close = () => {
+          if (!element.open) return;
+          element.open = false;
+          element.dispatchEvent(new Event('close'));
+        };
+      }
       elements.set(id, element);
     }
     return elements.get(id);
@@ -62,6 +75,16 @@ function openPage(startTime, getStorage) {
   return {
     get,
     activeElement: () => document.activeElement,
+    keydown(key) {
+      const event = Object.assign(new Event('keydown', { cancelable: true }), { key });
+      Object.defineProperty(event, 'target', { value: document.activeElement || document });
+      document.dispatchEvent(event);
+      if (key === 'Escape' && !event.defaultPrevented) {
+        // Simulate the browser's default Escape action for a modal dialog.
+        get('shortcuts-dialog').close();
+      }
+      return event.defaultPrevented;
+    },
     submit(focus, rest) {
       get('focus-minutes').value = focus;
       get('break-minutes').value = rest;
@@ -165,4 +188,99 @@ test('durations and the counter work while storage access or writes are blocked'
     page.tick(start + 4 * minute);
     assert.equal(page.get('daily-count').textContent, 'Today: 2 focus sessions');
   }
+});
+
+test('Space starts and pauses the timer and prevents the default action', () => {
+  const start = new Date(2026, 10, 27, 12).getTime();
+  const page = openPage(start, memoryStorage);
+
+  assert.equal(page.keydown(' '), true);
+  assert.equal(page.get('toggle').textContent, 'Pause');
+  page.tick(start + 1000);
+  assert.equal(page.keydown(' '), true);
+  assert.equal(page.get('toggle').textContent, 'Start');
+  assert.equal(page.get('countdown').textContent, '24:59');
+});
+
+test('R resets the timer and prevents the default action', () => {
+  const start = new Date(2026, 10, 27, 12).getTime();
+  const page = openPage(start, memoryStorage);
+  page.toggle();
+  page.tick(start + 1000);
+
+  assert.equal(page.keydown('R'), true);
+  assert.equal(page.get('toggle').textContent, 'Start');
+  assert.equal(page.get('countdown').textContent, '25:00');
+});
+
+test('S opens Settings, focuses Focus minutes and prevents the default action', () => {
+  const page = openPage(new Date(2026, 10, 27, 12).getTime(), memoryStorage);
+  assert.equal(page.get('settings').open, false);
+
+  assert.equal(page.keydown('S'), true);
+  assert.equal(page.get('settings').open, true);
+  assert.equal(page.activeElement(), page.get('focus-minutes'));
+});
+
+test('shortcut keys leave the timer and focus alone while typing in an input', () => {
+  const start = new Date(2026, 10, 27, 12).getTime();
+  const page = openPage(start, memoryStorage);
+  page.toggle();
+  page.tick(start + 1000);
+  page.keydown('s');
+  const input = page.get('break-minutes');
+  input.focus();
+
+  for (const key of [' ', 'r', 's', '?']) {
+    assert.equal(page.keydown(key), false, key);
+    assert.equal(page.get('toggle').textContent, 'Pause');
+    assert.equal(page.get('countdown').textContent, '24:59');
+    assert.equal(page.activeElement(), input);
+  }
+});
+
+test('? opens shortcut help, suppresses app shortcuts and lets Escape restore focus', () => {
+  const start = new Date(2026, 10, 27, 12).getTime();
+  const page = openPage(start, memoryStorage);
+  const dialog = page.get('shortcuts-dialog');
+  const reset = page.get('reset');
+  reset.focus();
+  page.toggle();
+  page.tick(start + 1000);
+
+  assert.equal(page.keydown('?'), true);
+  assert.equal(dialog.open, true);
+  assert.equal(page.activeElement(), page.get('shortcuts-close'));
+  assert.equal(page.keydown(' '), false);
+
+  dialog.focus();
+  for (const key of [' ', 'R', 'S', '?']) {
+    assert.equal(page.keydown(key), false, key);
+    assert.equal(page.get('toggle').textContent, 'Pause');
+    assert.equal(page.get('countdown').textContent, '24:59');
+    assert.equal(page.get('settings').open, false);
+    assert.equal(page.activeElement(), dialog);
+  }
+
+  assert.equal(page.keydown('Escape'), false);
+  assert.equal(dialog.open, false);
+  assert.equal(page.activeElement(), reset);
+  assert.equal(page.keydown('R'), true);
+  assert.equal(page.get('countdown').textContent, '25:00');
+});
+
+test('the Keyboard shortcuts button opens help and Close returns focus to the button', () => {
+  const page = openPage(new Date(2026, 10, 27, 12).getTime(), memoryStorage);
+  const trigger = page.get('shortcuts-trigger');
+  const dialog = page.get('shortcuts-dialog');
+  const close = page.get('shortcuts-close');
+  trigger.focus();
+  trigger.dispatchEvent(new Event('click'));
+
+  assert.equal(dialog.open, true);
+  assert.equal(page.activeElement(), close);
+
+  close.dispatchEvent(new Event('click'));
+  assert.equal(dialog.open, false);
+  assert.equal(page.activeElement(), trigger);
 });

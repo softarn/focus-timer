@@ -18,7 +18,7 @@
       <button id="reset" type="button" class="btn">Reset</button>
     </div>
     <p id="daily-count" class="daily-count">Today: 0 focus sessions</p>
-    <details class="settings">
+    <details id="settings" class="settings">
       <summary>Settings</summary>
       <form id="settings-form" novalidate>
         <div class="settings-field">
@@ -36,11 +36,27 @@
         <button type="submit" class="btn">Save</button>
       </form>
     </details>
+    <button id="shortcuts-trigger" type="button" class="btn shortcuts-trigger" aria-haspopup="dialog">Keyboard shortcuts</button>
     <!-- Announces phase changes and settings confirmations. -->
     <p id="status" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></p>
   </main>
+  <dialog id="shortcuts-dialog" aria-labelledby="shortcuts-title">
+    <h2 id="shortcuts-title">Keyboard shortcuts</h2>
+    <dl>
+      <dt><kbd>Space</kbd></dt>
+      <dd>Start or pause</dd>
+      <dt><kbd>R</kbd></dt>
+      <dd>Reset</dd>
+      <dt><kbd>S</kbd></dt>
+      <dd>Open settings</dd>
+      <dt><kbd>?</kbd></dt>
+      <dd>Open this help</dd>
+    </dl>
+    <button id="shortcuts-close" type="button" class="btn" autofocus>Close</button>
+  </dialog>
   <script src="timer.js"></script>
   <script src="settings.js"></script>
+  <script src="shortcuts.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
