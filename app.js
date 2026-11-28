@@ -43,6 +43,7 @@
     countdown: document.getElementById('countdown'),
     toggle: document.getElementById('toggle'),
     reset: document.getElementById('reset'),
+    skipBreak: document.getElementById('skip-break'),
     status: document.getElementById('status'),
     dailyCount: document.getElementById('daily-count'),
     settings: document.getElementById('settings'),
@@ -68,6 +69,7 @@
     els.phase.setAttribute('data-phase', s.phase);
     els.countdown.textContent = s.display;
     els.toggle.textContent = s.running ? 'Pause' : 'Start';
+    els.skipBreak.hidden = s.phase !== 'break';
     var title = PomodoroTimer.formatTitle(s);
     if (document.title !== title) document.title = title;
   }
@@ -236,6 +238,18 @@
     render();
   }
 
+  function skipBreak() {
+    var now = Date.now();
+    advance(now);
+    if (timer.getState().phase === 'break') {
+      timer.skipBreak(now);
+      startLoop();
+      setStatus('Break skipped. Time to focus.', false);
+    }
+    render();
+    els.toggle.focus();
+  }
+
   function openShortcuts() {
     if (els.shortcutsDialog.open) return;
     shortcutsPreviousFocus = document.activeElement;
@@ -245,6 +259,7 @@
 
   els.toggle.addEventListener('click', toggleTimer);
   els.reset.addEventListener('click', resetTimer);
+  els.skipBreak.addEventListener('click', skipBreak);
   els.shortcutsTrigger.addEventListener('click', openShortcuts);
   els.shortcutsClose.addEventListener('click', function () {
     els.shortcutsDialog.close();

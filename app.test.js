@@ -8,6 +8,7 @@ const { loadSettings } = require('./settings.js');
 const scripts = ['timer.js', 'settings.js', 'shortcuts.js', 'app.js'].map(file => fs.readFileSync(__dirname + '/' + file, 'utf8'));
 const html = fs.readFileSync(__dirname + '/index.html', 'utf8');
 const initialTitle = html.match(/<title>([^<]*)<\/title>/)[1];
+const skipBreakMarkup = html.match(/<button\b[^>]*\bid="skip-break"[^>]*>Skip break<\/button>/)?.[0];
 const minute = 60000;
 
 function memoryStorage() {
@@ -24,6 +25,8 @@ function openPage(startTime, getStorage) {
   let nextId = 0;
   const timeouts = new Map();
   const elements = new Map();
+  const notifications = [];
+  let notesPlayed = 0;
   const document = new EventTarget();
   document.hidden = false;
   let title = initialTitle;
@@ -52,7 +55,7 @@ function openPage(startTime, getStorage) {
         get: () => element.value === '' ? NaN : Number(element.value)
       });
       if (id === 'focus-minutes' || id === 'break-minutes') element.tagName = 'INPUT';
-      if (['toggle', 'reset', 'shortcuts-trigger', 'shortcuts-close'].includes(id)) element.tagName = 'BUTTON';
+      if (['toggle', 'reset', 'skip-break', 'shortcuts-trigger', 'shortcuts-close'].includes(id)) element.tagName = 'BUTTON';
       if (id === 'settings') element.open = false;
       if (id === 'shortcuts-dialog') {
         element.tagName = 'DIALOG';
@@ -72,7 +75,22 @@ function openPage(startTime, getStorage) {
   const page = vm.createContext({
     document,
     Date: class extends Date { static now() { return now; } },
-    window: { get localStorage() { return getStorage(); } },
+    window: {
+      get localStorage() { return getStorage(); },
+      AudioContext: class {
+        currentTime = 0;
+        createOscillator() {
+          return { frequency: {}, connect() {}, start() { notesPlayed++; }, stop() {} };
+        }
+        createGain() {
+          return { gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {} };
+        }
+      }
+    },
+    Notification: class {
+      static permission = 'granted';
+      constructor(title, { body }) { notifications.push(body); }
+    },
     setInterval: callback => { interval = callback; return 1; },
     clearInterval: () => { interval = undefined; },
     setTimeout(callback, delay) {
@@ -88,6 +106,8 @@ function openPage(startTime, getStorage) {
     get,
     get title() { return document.title; },
     get titleWrites() { return writtenTitles.length; },
+    get notesPlayed() { return notesPlayed; },
+    notifications,
     writtenTitles,
     activeElement: () => document.activeElement,
     keydown(key) {
@@ -108,6 +128,10 @@ function openPage(startTime, getStorage) {
     toggle(at = now) {
       now = at;
       get('toggle').dispatchEvent(new Event('click'));
+    },
+    skipBreak(at = now) {
+      now = at;
+      get('skip-break').dispatchEvent(new Event('click'));
     },
     tick(at) {
       now = at;
@@ -192,6 +216,76 @@ test('resetting during a running break restores the default tab title', () => {
 
   page.get('reset').dispatchEvent(new Event('click'));
   assertTitle(page, 'Focus Timer');
+});
+
+test('Skip break is hidden before scripts run and only appears during a break', () => {
+  const start = new Date(2026, 10, 27, 12).getTime();
+  const page = openPage(start, memoryStorage);
+  const skipBreak = page.get('skip-break');
+  assert.match(skipBreakMarkup, /\shidden>/);
+  assert.equal(skipBreak.hidden, true);
+
+  page.toggle();
+  assert.equal(skipBreak.hidden, true);
+  page.tick(start + 25 * minute);
+  assert.equal(skipBreak.hidden, false);
+  page.toggle();
+  assert.equal(page.get('toggle').textContent, 'Start');
+  assert.equal(skipBreak.hidden, false);
+
+  page.get('reset').dispatchEvent(new Event('click'));
+  assert.equal(skipBreak.hidden, true);
+});
+
+for (const paused of [false, true]) {
+  test(`skipping a ${paused ? 'paused' : 'running'} break starts a full focus session without alerts`, () => {
+    const start = new Date(2026, 10, 27, 12).getTime();
+    const page = openPage(start, memoryStorage);
+    const skipBreak = page.get('skip-break');
+    const breakStart = start + 7 * minute;
+    page.submit('7', '3');
+    page.toggle();
+    page.tick(breakStart);
+    if (paused) page.toggle();
+    skipBreak.focus();
+    assert.equal(page.keydown(' '), false);
+    assert.equal(page.get('daily-count').textContent, 'Today: 1 focus session');
+
+    const clickTime = breakStart + 10000;
+    page.skipBreak(clickTime);
+    assert.equal(skipBreak.hidden, true);
+    assert.equal(page.get('phase').textContent, 'Focus');
+    assert.equal(page.get('countdown').textContent, '07:00');
+    assert.equal(page.get('toggle').textContent, 'Pause');
+    assertTitle(page, '7:00 · Focus');
+    assert.equal(page.get('daily-count').textContent, 'Today: 1 focus session');
+    assert.equal(page.get('status').textContent, 'Break skipped. Time to focus.');
+    assert.equal(page.activeElement(), page.get('toggle'));
+    assert.equal(page.notesPlayed, 2);
+    assert.deepEqual(page.notifications, ['Focus complete. Time for a break.']);
+
+    page.tick(clickTime + 1000);
+    assert.equal(page.get('countdown').textContent, '06:59');
+  });
+}
+
+test('clicking Skip break after the break expires handles the normal transition', () => {
+  const start = new Date(2026, 10, 27, 12).getTime();
+  const page = openPage(start, memoryStorage);
+  page.submit('1', '1');
+  page.toggle();
+  page.tick(start + minute);
+  assert.equal(page.get('skip-break').hidden, false);
+
+  // The button is still on screen because the interval has not fired again.
+  page.skipBreak(start + 2 * minute + 1000);
+  assert.equal(page.get('skip-break').hidden, true);
+  assertTitle(page, '0:59 · Focus');
+  assert.equal(page.get('status').textContent, 'Break over. Time to focus.');
+  assert.equal(page.get('daily-count').textContent, 'Today: 1 focus session');
+  assert.equal(page.notesPlayed, 4);
+  assert.deepEqual(page.notifications, ['Focus complete. Time for a break.', 'Break over. Time to focus.']);
+  assert.equal(page.activeElement(), page.get('toggle'));
 });
 
 test('the tab title survives saving durations while paused and returns to default on reset', () => {
