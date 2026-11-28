@@ -50,13 +50,17 @@
     focusMinutes: document.getElementById('focus-minutes'),
     breakMinutes: document.getElementById('break-minutes'),
     focusError: document.getElementById('focus-error'),
-    breakError: document.getElementById('break-error')
+    breakError: document.getElementById('break-error'),
+    shortcutsTrigger: document.getElementById('shortcuts-trigger'),
+    shortcutsDialog: document.getElementById('shortcuts-dialog'),
+    shortcutsClose: document.getElementById('shortcuts-close')
   };
   var LABELS = { focus: 'Focus', break: 'Break' };
   var intervalId = null;
   var audioCtx = null;
   var midnightTimeoutId = null;
   var statusTimeoutId = null;
+  var shortcutsPreviousFocus = null;
 
   function render() {
     var s = timer.getState();
@@ -231,16 +235,35 @@
     render();
   }
 
+  function openShortcuts() {
+    if (els.shortcutsDialog.open) return;
+    shortcutsPreviousFocus = document.activeElement;
+    els.shortcutsDialog.showModal();
+    els.shortcutsClose.focus();
+  }
+
   els.toggle.addEventListener('click', toggleTimer);
   els.reset.addEventListener('click', resetTimer);
+  els.shortcutsTrigger.addEventListener('click', openShortcuts);
+  els.shortcutsClose.addEventListener('click', function () {
+    els.shortcutsDialog.close();
+  });
+  els.shortcutsDialog.addEventListener('close', function () {
+    if (els.shortcutsDialog.open || !shortcutsPreviousFocus) return;
+    var previousFocus = shortcutsPreviousFocus;
+    shortcutsPreviousFocus = null;
+    previousFocus.focus();
+  });
 
   document.addEventListener('keydown', function (event) {
+    if (els.shortcutsDialog.open) return;
     var action = PomodoroShortcuts.actionFor(event);
     if (action === null) return;
     event.preventDefault();
 
     if (action === 'toggle') toggleTimer();
     else if (action === 'reset') resetTimer();
+    else if (action === 'help') openShortcuts();
     else if (action === 'settings') {
       els.settings.open = true;
       els.focusMinutes.focus();

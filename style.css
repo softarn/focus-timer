@@ -138,6 +138,40 @@ body {
   font-size: .875rem;
   font-weight: 600;
 }
+.shortcuts-trigger {
+  margin-top: 12px;
+  padding: 0 12px;
+  font-size: .875rem;
+}
+#shortcuts-dialog {
+  width: min(20rem, calc(100% - 32px));
+  padding: 24px;
+  color: var(--text);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+}
+#shortcuts-dialog::backdrop {
+  background: var(--bg);
+  opacity: .85;
+}
+#shortcuts-dialog h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+#shortcuts-dialog dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 8px 16px;
+  margin: 16px 0 20px;
+}
+#shortcuts-dialog dd { margin: 0; }
+#shortcuts-dialog kbd {
+  padding: 2px 5px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
 #status:not(.visually-hidden) { margin: 12px 0 0; }
 .visually-hidden {
   position: absolute;

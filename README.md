@@ -8,6 +8,8 @@ Plain HTML, CSS and JavaScript — no build step, no dependencies, no network.
 Open `index.html` directly in a browser (double-click it or use `file://`).
 
 - **Start / Pause** toggles the countdown. **Reset** returns to a fresh focus countdown at the configured duration.
+- Press **Space** to start or pause, **R** to reset, or **S** to open settings.
+- Press **?** or select **Keyboard shortcuts** to open the shortcut list. Press **Escape** or select **Close** to dismiss it.
 - Open **Settings** to set **Focus minutes** and **Break minutes** to whole numbers from 1 to 90, then select **Save**. The browser remembers them when local storage is available. A focus or break already in progress keeps its remaining time.
 - **Today** counts completed focus sessions. It resets at local midnight and is remembered across reloads when local storage is available.
 - When a phase ends, a soft chime plays and, if you allowed it, a notification appears.

@@ -40,7 +40,18 @@ function openPage(startTime, getStorage) {
         get: () => element.value === '' ? NaN : Number(element.value)
       });
       if (id === 'focus-minutes' || id === 'break-minutes') element.tagName = 'INPUT';
+      if (['toggle', 'reset', 'shortcuts-trigger', 'shortcuts-close'].includes(id)) element.tagName = 'BUTTON';
       if (id === 'settings') element.open = false;
+      if (id === 'shortcuts-dialog') {
+        element.tagName = 'DIALOG';
+        element.open = false;
+        element.showModal = () => { element.open = true; };
+        element.close = () => {
+          if (!element.open) return;
+          element.open = false;
+          element.dispatchEvent(new Event('close'));
+        };
+      }
       elements.set(id, element);
     }
     return elements.get(id);
@@ -68,6 +79,10 @@ function openPage(startTime, getStorage) {
       const event = Object.assign(new Event('keydown', { cancelable: true }), { key });
       Object.defineProperty(event, 'target', { value: document.activeElement || document });
       document.dispatchEvent(event);
+      if (key === 'Escape' && !event.defaultPrevented) {
+        // Simulate the browser's default Escape action for a modal dialog.
+        get('shortcuts-dialog').close();
+      }
       return event.defaultPrevented;
     },
     submit(focus, rest) {
@@ -222,4 +237,50 @@ test('shortcut keys leave the timer and focus alone while typing in an input', (
     assert.equal(page.get('countdown').textContent, '24:59');
     assert.equal(page.activeElement(), input);
   }
+});
+
+test('? opens shortcut help, suppresses app shortcuts and lets Escape restore focus', () => {
+  const start = new Date(2026, 10, 27, 12).getTime();
+  const page = openPage(start, memoryStorage);
+  const dialog = page.get('shortcuts-dialog');
+  const reset = page.get('reset');
+  reset.focus();
+  page.toggle();
+  page.tick(start + 1000);
+
+  assert.equal(page.keydown('?'), true);
+  assert.equal(dialog.open, true);
+  assert.equal(page.activeElement(), page.get('shortcuts-close'));
+  assert.equal(page.keydown(' '), false);
+
+  dialog.focus();
+  for (const key of [' ', 'R', 'S', '?']) {
+    assert.equal(page.keydown(key), false, key);
+    assert.equal(page.get('toggle').textContent, 'Pause');
+    assert.equal(page.get('countdown').textContent, '24:59');
+    assert.equal(page.get('settings').open, false);
+    assert.equal(page.activeElement(), dialog);
+  }
+
+  assert.equal(page.keydown('Escape'), false);
+  assert.equal(dialog.open, false);
+  assert.equal(page.activeElement(), reset);
+  assert.equal(page.keydown('R'), true);
+  assert.equal(page.get('countdown').textContent, '25:00');
+});
+
+test('the Keyboard shortcuts button opens help and Close returns focus to the button', () => {
+  const page = openPage(new Date(2026, 10, 27, 12).getTime(), memoryStorage);
+  const trigger = page.get('shortcuts-trigger');
+  const dialog = page.get('shortcuts-dialog');
+  const close = page.get('shortcuts-close');
+  trigger.focus();
+  trigger.dispatchEvent(new Event('click'));
+
+  assert.equal(dialog.open, true);
+  assert.equal(page.activeElement(), close);
+
+  close.dispatchEvent(new Event('click'));
+  assert.equal(dialog.open, false);
+  assert.equal(page.activeElement(), trigger);
 });
