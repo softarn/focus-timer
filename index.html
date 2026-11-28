@@ -30,15 +30,20 @@
           <label for="break-minutes">Break minutes</label>
           <input id="break-minutes" type="number" min="1" max="90" step="1" inputmode="numeric" required aria-describedby="break-error">
         </div>
+        <div class="settings-field">
+          <label for="daily-goal">Daily goal</label>
+          <input id="daily-goal" type="number" min="1" max="24" step="1" inputmode="numeric" aria-describedby="goal-error">
+        </div>
         <div class="settings-errors" role="alert" aria-atomic="true">
           <p id="focus-error"></p>
           <p id="break-error"></p>
+          <p id="goal-error"></p>
         </div>
         <button type="submit" class="btn">Save</button>
       </form>
     </details>
     <button id="shortcuts-trigger" type="button" class="btn shortcuts-trigger" aria-haspopup="dialog">Keyboard shortcuts</button>
-    <!-- Announces phase changes and settings confirmations. -->
+    <!-- Announces phase changes, settings confirmations and goal milestones. -->
     <p id="status" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></p>
   </main>
   <dialog id="shortcuts-dialog" aria-labelledby="shortcuts-title">

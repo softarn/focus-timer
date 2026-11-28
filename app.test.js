@@ -3,13 +3,14 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const { loadSettings } = require('./settings.js');
+const { loadSettings, loadDailyGoal } = require('./settings.js');
 
 const scripts = ['timer.js', 'settings.js', 'shortcuts.js', 'app.js'].map(file => fs.readFileSync(__dirname + '/' + file, 'utf8'));
 const html = fs.readFileSync(__dirname + '/index.html', 'utf8');
 const initialTitle = html.match(/<title>([^<]*)<\/title>/)[1];
 const skipBreakMarkup = html.match(/<button\b[^>]*\bid="skip-break"[^>]*>Skip break<\/button>/)?.[0];
 const minute = 60000;
+const goalReached = 'Goal reached — nice work';
 
 function memoryStorage() {
   const values = new Map();
@@ -26,6 +27,7 @@ function openPage(startTime, getStorage) {
   const timeouts = new Map();
   const elements = new Map();
   const notifications = [];
+  const statusWrites = [];
   let notesPlayed = 0;
   const document = new EventTarget();
   document.hidden = false;
@@ -42,10 +44,15 @@ function openPage(startTime, getStorage) {
     if (!elements.has(id)) {
       const element = new EventTarget();
       const attributes = new Map();
+      const classes = new Set();
       Object.assign(element, {
         min: '1',
-        max: '90',
-        classList: { toggle() {} },
+        max: id === 'daily-goal' ? '24' : '90',
+        validity: { badInput: false },
+        classList: {
+          toggle: (name, force) => force ? classes.add(name) : classes.delete(name),
+          contains: name => classes.has(name)
+        },
         setAttribute: (name, value) => attributes.set(name, value),
         getAttribute: name => attributes.get(name),
         removeAttribute: name => attributes.delete(name),
@@ -54,7 +61,15 @@ function openPage(startTime, getStorage) {
       Object.defineProperty(element, 'valueAsNumber', {
         get: () => element.value === '' ? NaN : Number(element.value)
       });
-      if (id === 'focus-minutes' || id === 'break-minutes') element.tagName = 'INPUT';
+      if (['focus-minutes', 'break-minutes', 'daily-goal'].includes(id)) element.tagName = 'INPUT';
+      if (id === 'status') {
+        classes.add('visually-hidden');
+        let status = '';
+        Object.defineProperty(element, 'textContent', {
+          get: () => status,
+          set: text => { status = text; statusWrites.push(text); }
+        });
+      }
       if (['toggle', 'reset', 'skip-break', 'shortcuts-trigger', 'shortcuts-close'].includes(id)) element.tagName = 'BUTTON';
       if (id === 'settings') element.open = false;
       if (id === 'shortcuts-dialog') {
@@ -108,6 +123,7 @@ function openPage(startTime, getStorage) {
     get titleWrites() { return writtenTitles.length; },
     get notesPlayed() { return notesPlayed; },
     notifications,
+    statusWrites,
     writtenTitles,
     activeElement: () => document.activeElement,
     keydown(key) {
@@ -120,9 +136,10 @@ function openPage(startTime, getStorage) {
       }
       return event.defaultPrevented;
     },
-    submit(focus, rest) {
+    submit(focus, rest, goal = get('daily-goal').value) {
       get('focus-minutes').value = focus;
       get('break-minutes').value = rest;
+      get('daily-goal').value = goal;
       assert.equal(get('settings-form').dispatchEvent(new Event('submit', { cancelable: true })), false);
     },
     toggle(at = now) {
@@ -605,7 +622,7 @@ test('only a valid settings pair changes the timer and survives reload', () => {
   const page = openPage(now, () => storage);
   page.submit('90', '1');
   assert.equal(page.get('countdown').textContent, '90:00');
-  assert.equal(page.get('status').textContent, 'Durations updated.');
+  assert.equal(page.get('status').textContent, 'Settings saved.');
   page.runTimeouts(now + 3000);
   assert.equal(page.get('status').textContent, '');
 
@@ -628,6 +645,168 @@ test('only a valid settings pair changes the timer and survives reload', () => {
   assert.equal(reloaded.get('focus-minutes').value, 90);
   assert.equal(reloaded.get('break-minutes').value, 1);
   assert.equal(reloaded.get('countdown').textContent, '90:00');
+});
+
+test('the daily goal updates the count line on save and is prefilled on reload', () => {
+  const start = new Date(2026, 10, 27, 12).getTime();
+  const storage = memoryStorage();
+  const page = openPage(start, () => storage);
+  assert.equal(page.get('daily-goal').value, '');
+  assert.equal(page.get('daily-count').textContent, 'Today: 0 focus sessions');
+  page.submit('1', '1', '6');
+  assert.equal(page.get('daily-count').textContent, 'Today: 0 of 6');
+  page.toggle();
+  page.tick(start + 3 * minute);
+  assert.equal(page.get('daily-count').textContent, 'Today: 2 of 6');
+
+  const reloaded = openPage(start + 3 * minute, () => storage);
+  assert.equal(Number(reloaded.get('daily-goal').value), 6);
+  assert.equal(reloaded.get('daily-count').textContent, 'Today: 2 of 6');
+  reloaded.submit('1', '1', '');
+  assert.equal(reloaded.get('daily-count').textContent, 'Today: 2 focus sessions');
+  assert.equal(openPage(start + 3 * minute, () => storage).get('daily-goal').value, '');
+});
+
+test('an invalid daily goal focuses the field and leaves all saved settings untouched', () => {
+  const storage = memoryStorage();
+  const page = openPage(new Date(2026, 10, 27, 12).getTime(), () => storage);
+  const field = page.get('daily-goal');
+  assert.match(html, /<label for="daily-goal">Daily goal<\/label>/);
+  assert.match(html, /<input id="daily-goal" type="number" min="1" max="24" step="1"[^>]*aria-describedby="goal-error">/);
+  page.submit('8', '2', '6');
+
+  for (const invalid of ['0', '25', '1.5', '']) {
+    field.validity.badInput = invalid === '';
+    page.submit('30', '5', invalid);
+    assert.equal(field.getAttribute('aria-invalid'), 'true');
+    assert.equal(page.get('goal-error').textContent, 'Daily goal must be a whole number from 1 to 24.');
+    assert.equal(page.activeElement(), field);
+    assert.equal(page.get('daily-count').textContent, 'Today: 0 of 6');
+    assert.equal(page.get('countdown').textContent, '08:00');
+    assert.deepEqual(loadSettings(storage), { focusMinutes: 8, breakMinutes: 2 });
+    assert.equal(loadDailyGoal(storage), 6);
+  }
+
+  field.validity.badInput = false;
+  page.submit('30', '0', '24');
+  assert.equal(field.getAttribute('aria-invalid'), undefined);
+  assert.equal(page.get('goal-error').textContent, '');
+  assert.equal(page.activeElement(), page.get('break-minutes'));
+  assert.equal(loadDailyGoal(storage), 6);
+  page.submit('30', '5', '24');
+  assert.equal(page.get('daily-count').textContent, 'Today: 0 of 24');
+});
+
+test('reaching the daily goal is visible and announced once per local day', () => {
+  const start = new Date(2026, 10, 27, 12).getTime();
+  const midnight = new Date(2026, 10, 28).getTime();
+  const storage = memoryStorage();
+  const page = openPage(start, () => storage);
+  const status = page.get('status');
+  const goalWrites = page => page.statusWrites.filter(text => text === goalReached);
+  assert.match(html, /<p id="status" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true">/);
+  assert.match(html, /<div id="countdown"[^>]*role="timer" aria-live="off"/);
+
+  page.submit('1', '1', '6');
+  page.toggle();
+  page.tick(start + 9 * minute);
+  assert.equal(page.get('daily-count').textContent, 'Today: 5 of 6');
+  assert.deepEqual(goalWrites(page), []);
+  page.setHidden(true);
+  page.tick(start + 11 * minute);
+  assert.equal(page.get('daily-count').textContent, 'Today: 6 of 6');
+  assert.equal(status.textContent, goalReached);
+  assert.equal(status.classList.contains('visually-hidden'), false);
+  const goalNotification = 'Focus complete. ' + goalReached + '.';
+  assert.equal(page.notifications.at(-1), goalNotification);
+
+  page.runTimeouts(start + 11 * minute + 4000);
+  page.setHidden(false);
+  assert.equal(status.textContent, goalReached);
+  assert.equal(status.classList.contains('visually-hidden'), false);
+  page.tick(start + 13 * minute);
+  assert.equal(page.get('daily-count').textContent, 'Today: 7 of 6');
+  assert.equal(status.textContent, goalReached);
+  assert.deepEqual(page.notifications.filter(text => text === goalNotification), [goalNotification]);
+  page.submit('1', '1');
+  assert.equal(status.textContent, 'Settings saved.');
+  assert.deepEqual(goalWrites(page), [goalReached]);
+
+  const reloaded = openPage(start + 13 * minute, () => storage);
+  assert.equal(reloaded.get('status').textContent, '');
+  reloaded.submit('1', '1', '8');
+  assert.equal(reloaded.get('daily-count').textContent, 'Today: 7 of 8');
+  reloaded.toggle();
+  reloaded.tick(start + 14 * minute);
+  assert.equal(reloaded.get('daily-count').textContent, 'Today: 8 of 8');
+  assert.deepEqual(goalWrites(reloaded), []);
+
+  reloaded.toggle();
+  reloaded.runTimeouts(midnight);
+  assert.equal(reloaded.get('daily-count').textContent, 'Today: 0 of 8');
+  reloaded.get('reset').dispatchEvent(new Event('click'));
+  reloaded.toggle();
+  reloaded.tick(midnight + 15 * minute);
+  assert.equal(reloaded.get('daily-count').textContent, 'Today: 8 of 8');
+  assert.equal(reloaded.get('status').textContent, goalReached);
+  assert.deepEqual(goalWrites(reloaded), [goalReached]);
+});
+
+test('timer controls dismiss a goal message that is already visible', () => {
+  const start = new Date(2026, 10, 27, 12).getTime();
+  const actions = [
+    [page => page.toggle(), ''],
+    [page => page.get('reset').dispatchEvent(new Event('click')), ''],
+    [page => page.skipBreak(), 'Break skipped. Time to focus.']
+  ];
+  for (const [act, expectedStatus] of actions) {
+    const page = openPage(start, memoryStorage);
+    page.submit('1', '1', '1');
+    page.toggle();
+    page.tick(start + minute);
+    assert.equal(page.get('status').textContent, goalReached);
+    act(page);
+    assert.equal(page.get('status').textContent, expectedStatus);
+  }
+});
+
+test('a late tick can cross the goal once and an immediate phase change preserves the message', () => {
+  const start = new Date(2026, 10, 27, 12).getTime();
+  const page = openPage(start, memoryStorage);
+  page.submit('1', '1', '3');
+  page.toggle();
+  page.tick(start + 8 * minute - 1);
+  assert.equal(page.get('daily-count').textContent, 'Today: 4 of 3');
+  assert.equal(page.get('status').textContent, goalReached);
+  page.tick(start + 8 * minute);
+  assert.equal(page.get('phase').textContent, 'Focus');
+  assert.equal(page.get('status').textContent, goalReached);
+  assert.deepEqual(page.statusWrites.filter(text => text === goalReached), [goalReached]);
+});
+
+test('a late Skip break press preserves a goal reached during that press', () => {
+  const start = new Date(2026, 10, 27, 12).getTime();
+  const page = openPage(start, memoryStorage);
+  page.submit('1', '1', '2');
+  page.toggle();
+  page.tick(start + minute);
+  page.skipBreak(start + 3 * minute);
+  assert.equal(page.get('phase').textContent, 'Focus');
+  assert.equal(page.get('daily-count').textContent, 'Today: 2 of 2');
+  assert.equal(page.get('status').textContent, goalReached);
+});
+
+test('saving a goal at the current count does not trigger an announcement', () => {
+  const start = new Date(2026, 10, 27, 12).getTime();
+  const page = openPage(start, memoryStorage);
+  page.submit('1', '1');
+  page.toggle();
+  page.tick(start + minute);
+  page.submit('1', '1', '1');
+  assert.equal(page.get('daily-count').textContent, 'Today: 1 of 1');
+  page.tick(start + 3 * minute);
+  assert.equal(page.get('daily-count').textContent, 'Today: 2 of 1');
+  assert.equal(page.statusWrites.includes(goalReached), false);
 });
 
 test('a completion on pause counts once and the counter resets at midnight while idle', () => {

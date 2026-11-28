@@ -36,6 +36,7 @@
 
   var storage = getStorage();
   var savedSettings = PomodoroSettings.loadSettings(storage);
+  var dailyGoal = PomodoroSettings.loadDailyGoal(storage);
   var durations = toDurations(savedSettings);
   var timer = PomodoroTimer.createTimer(durations);
   var els = {
@@ -50,13 +51,16 @@
     settingsForm: document.getElementById('settings-form'),
     focusMinutes: document.getElementById('focus-minutes'),
     breakMinutes: document.getElementById('break-minutes'),
+    dailyGoal: document.getElementById('daily-goal'),
     focusError: document.getElementById('focus-error'),
     breakError: document.getElementById('break-error'),
+    goalError: document.getElementById('goal-error'),
     shortcutsTrigger: document.getElementById('shortcuts-trigger'),
     shortcutsDialog: document.getElementById('shortcuts-dialog'),
     shortcutsClose: document.getElementById('shortcuts-close')
   };
   var LABELS = { focus: 'Focus', break: 'Break' };
+  var GOAL_REACHED = 'Goal reached — nice work';
   var intervalId = null;
   var audioCtx = null;
   var midnightTimeoutId = null;
@@ -76,7 +80,8 @@
 
   function renderCount(now) {
     var count = PomodoroSettings.getTodayCount(storage, now);
-    var text = 'Today: ' + count + ' focus session' + (count === 1 ? '' : 's');
+    var text = 'Today: ' + count;
+    text += dailyGoal === null ? ' focus session' + (count === 1 ? '' : 's') : ' of ' + dailyGoal;
     if (els.dailyCount.textContent !== text) els.dailyCount.textContent = text;
   }
 
@@ -89,21 +94,31 @@
     midnightTimeoutId = setTimeout(refreshToday, nextMidnight.getTime() - now);
   }
 
-  function setStatus(text, show) {
+  function setStatus(text, show, hideAfterMs) {
     clearTimeout(statusTimeoutId);
     els.status.classList.toggle('visually-hidden', !show);
     els.status.textContent = text;
-    if (show) {
-      statusTimeoutId = setTimeout(function () { setStatus('', false); }, 3000);
+    if (hideAfterMs) {
+      statusTimeoutId = setTimeout(function () { setStatus('', false); }, hideAfterMs);
     }
   }
 
-  function validateMinutes(input, error, label) {
-    var minutes = input.valueAsNumber;
-    var invalid = !Number.isInteger(minutes) || minutes < Number(input.min) || minutes > Number(input.max);
+  function setPhaseStatus(text) {
+    // Keep the goal message visible across automatic transitions.
+    if (els.status.textContent !== GOAL_REACHED) setStatus(text, false);
+  }
+
+  function dismissGoalStatus() {
+    if (els.status.textContent === GOAL_REACHED) setStatus('', false);
+  }
+
+  function validateNumber(input, error, label, optional) {
+    var value = input.valueAsNumber;
+    var empty = optional && input.value === '' && !input.validity.badInput;
+    var invalid = !empty && (!Number.isInteger(value) || value < Number(input.min) || value > Number(input.max));
     if (invalid) {
       input.setAttribute('aria-invalid', 'true');
-      error.textContent = label + ' must be a whole number from 1 to 90.';
+      error.textContent = label + ' must be a whole number from ' + input.min + ' to ' + input.max + '.';
     } else {
       input.removeAttribute('aria-invalid');
       error.textContent = '';
@@ -113,20 +128,27 @@
 
   els.focusMinutes.value = savedSettings.focusMinutes;
   els.breakMinutes.value = savedSettings.breakMinutes;
+  els.dailyGoal.value = dailyGoal === null ? '' : dailyGoal;
   els.settingsForm.addEventListener('submit', function (event) {
     event.preventDefault();
-    var focusValid = validateMinutes(els.focusMinutes, els.focusError, 'Focus minutes');
-    var breakValid = validateMinutes(els.breakMinutes, els.breakError, 'Break minutes');
-    if (!focusValid || !breakValid) {
-      (focusValid ? els.breakMinutes : els.focusMinutes).focus();
+    var focusValid = validateNumber(els.focusMinutes, els.focusError, 'Focus minutes');
+    var breakValid = validateNumber(els.breakMinutes, els.breakError, 'Break minutes');
+    var goalValid = validateNumber(els.dailyGoal, els.goalError, 'Daily goal', true);
+    if (!focusValid || !breakValid || !goalValid) {
+      var firstInvalid = !focusValid ? els.focusMinutes : !breakValid ? els.breakMinutes : els.dailyGoal;
+      firstInvalid.focus();
       return;
     }
     var settings = { focusMinutes: els.focusMinutes.valueAsNumber, breakMinutes: els.breakMinutes.valueAsNumber };
+    var goal = els.dailyGoal.value === '' ? null : els.dailyGoal.valueAsNumber;
     PomodoroSettings.saveSettings(storage, settings);
+    PomodoroSettings.saveDailyGoal(storage, goal);
+    dailyGoal = goal;
     durations = toDurations(settings);
     timer.setDurations(durations);
     render();
-    setStatus('Durations updated.', true);
+    refreshToday();
+    setStatus('Settings saved.', true, 3000);
   });
 
   function chime() {
@@ -170,11 +192,12 @@
     } catch (e) { /* ignore */ }
   }
 
-  function onPhaseEnd(phase) {
+  function onPhaseEnd(phase, goalReached) {
     var text = phase === 'break' ? 'Focus complete. Time for a break.' : 'Break over. Time to focus.';
-    setStatus(text, false);
+    if (goalReached) setStatus(GOAL_REACHED, true);
+    else setPhaseStatus(text);
     chime();
-    notify(text);
+    notify(goalReached ? 'Focus complete. ' + GOAL_REACHED + '.' : text);
   }
 
   function advance(now) {
@@ -184,19 +207,27 @@
 
     var state = timer.getState();
     var completions = PomodoroTimer.countFocusCompletions(previousPhase, switches);
+    var goalReached = false;
     if (completions > 0) {
       // Walk back from the most recent focus completion and stop at local midnight.
       var completedAt = now + state.remainingMs - durations.breakMs;
       if (state.phase === 'focus') completedAt -= durations.focusMs;
       var midnight = new Date(now).setHours(0, 0, 0, 0);
       var cycleMs = durations.focusMs + durations.breakMs;
+      var previousCount = PomodoroSettings.getTodayCount(storage, now);
+      var count = previousCount;
       for (var i = 0; i < completions && completedAt >= midnight; i++) {
-        PomodoroSettings.recordFocusComplete(storage, completedAt);
+        count = PomodoroSettings.recordFocusComplete(storage, completedAt);
         completedAt -= cycleMs;
       }
       renderCount(now);
+      if (dailyGoal !== null && previousCount < dailyGoal && count >= dailyGoal &&
+          !PomodoroSettings.hasShownGoalToday(storage, now)) {
+        PomodoroSettings.recordGoalShown(storage, now);
+        goalReached = true;
+      }
     }
-    onPhaseEnd(state.phase);
+    onPhaseEnd(state.phase, goalReached);
   }
 
   function loop() {
@@ -212,6 +243,7 @@
   }
 
   function toggleTimer() {
+    dismissGoalStatus();
     if (timer.getState().running) {
       var now = Date.now();
       advance(now);
@@ -239,12 +271,14 @@
   }
 
   function skipBreak() {
+    // Dismiss an earlier message before advance can reach a new goal.
+    dismissGoalStatus();
     var now = Date.now();
     advance(now);
     if (timer.getState().phase === 'break') {
       timer.skipBreak(now);
       startLoop();
-      setStatus('Break skipped. Time to focus.', false);
+      setPhaseStatus('Break skipped. Time to focus.');
     }
     render();
     els.toggle.focus();

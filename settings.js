@@ -1,4 +1,4 @@
-/* Pomodoro settings and daily focus count. Callers supply storage and time. */
+/* Pomodoro settings, daily focus count and goal. Callers supply storage and time. */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
     module.exports = factory();
@@ -10,6 +10,8 @@
 
   var SETTINGS_KEY = 'focus-timer.settings';
   var COUNT_KEY = 'focus-timer.daily-count';
+  var GOAL_KEY = 'focus-timer.daily-goal';
+  var GOAL_SHOWN_KEY = 'focus-timer.goal-shown';
 
   function normalizeMinutes(minutes) {
     if (!Number.isFinite(minutes)) return null;
@@ -36,6 +38,24 @@
   function saveSettings(storage, settings) {
     try {
       storage.setItem(SETTINGS_KEY, JSON.stringify(normalizeSettings(settings)));
+    } catch (e) { /* storage is optional */ }
+  }
+
+  function normalizeDailyGoal(goal) {
+    return Number.isInteger(goal) && goal >= 1 && goal <= 24 ? goal : null;
+  }
+
+  function loadDailyGoal(storage) {
+    try {
+      return normalizeDailyGoal(JSON.parse(storage.getItem(GOAL_KEY)));
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function saveDailyGoal(storage, goal) {
+    try {
+      storage.setItem(GOAL_KEY, JSON.stringify(normalizeDailyGoal(goal)));
     } catch (e) { /* storage is optional */ }
   }
 
@@ -81,11 +101,31 @@
     }
   }
 
+  function hasShownGoalToday(storage, now) {
+    try {
+      var date = localDateKey(now);
+      return date !== null && storage.getItem(GOAL_SHOWN_KEY) === date;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function recordGoalShown(storage, now) {
+    try {
+      var date = localDateKey(now);
+      if (date !== null) storage.setItem(GOAL_SHOWN_KEY, date);
+    } catch (e) { /* storage is optional */ }
+  }
+
   return {
     normalizeMinutes: normalizeMinutes,
     loadSettings: loadSettings,
     saveSettings: saveSettings,
+    loadDailyGoal: loadDailyGoal,
+    saveDailyGoal: saveDailyGoal,
     getTodayCount: getTodayCount,
-    recordFocusComplete: recordFocusComplete
+    recordFocusComplete: recordFocusComplete,
+    hasShownGoalToday: hasShownGoalToday,
+    recordGoalShown: recordGoalShown
   };
 });
