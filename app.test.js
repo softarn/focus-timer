@@ -464,13 +464,14 @@ test('a focus session skipped into before midnight counts on the day it complete
 
   for (const [skipTime, completedBeforeMidnight] of [[midnight - 70000, true], [midnight - 10000, false]]) {
     const storage = memoryStorage();
-    const start = midnight - 90000;
-    const page = openPage(start, () => storage);
+    // The first focus session ends 10 seconds before the skip.
+    const breakStart = skipTime - 10000;
+    const page = openPage(breakStart - minute, () => storage);
     page.submit('1', '1');
     page.toggle();
-    // The first focus session ends at 23:59:30.
-    page.tick(midnight - 30000);
+    page.tick(breakStart);
     assert.equal(page.get('phase').textContent, 'Break');
+    assert.deepEqual(countEntry(storage), { date: '2026-11-27', count: 1 });
     assert.equal(page.get('daily-count').textContent, 'Today: 1 focus session');
 
     page.skipBreak(skipTime);
@@ -503,11 +504,15 @@ test('a late tick spanning midnight after a skip counts only the sessions that e
     [midnight - 10000, midnight + 175000, '0:55 · Break', 2]
   ]) {
     const storage = memoryStorage();
-    const page = openPage(midnight - 90000, () => storage);
+    // The first focus session ends 10 seconds before the skip.
+    const breakStart = skipTime - 10000;
+    const page = openPage(breakStart - minute, () => storage);
     page.submit('1', '1');
     page.toggle();
-    page.tick(midnight - 30000);
+    page.tick(breakStart);
+    assert.equal(page.get('phase').textContent, 'Break');
     page.skipBreak(skipTime);
+    assertTitle(page, '1:00 · Focus');
 
     page.tick(tickTime);
     assertTitle(page, title);
