@@ -25,11 +25,15 @@ function openPage(startTime, getStorage) {
   const timeouts = new Map();
   const elements = new Map();
   const document = new EventTarget();
+  document.hidden = false;
   let title = initialTitle;
-  let titleWrites = 0;
+  const writtenTitles = [];
   Object.defineProperty(document, 'title', {
     get: () => title,
-    set: value => { title = value; titleWrites++; }
+    set: value => {
+      title = value;
+      writtenTitles.push(value);
+    }
   });
   document.getElementById = id => {
     if (!elements.has(id)) {
@@ -83,7 +87,8 @@ function openPage(startTime, getStorage) {
   return {
     get,
     get title() { return document.title; },
-    get titleWrites() { return titleWrites; },
+    get titleWrites() { return writtenTitles.length; },
+    writtenTitles,
     activeElement: () => document.activeElement,
     keydown(key) {
       const event = Object.assign(new Event('keydown', { cancelable: true }), { key });
@@ -108,6 +113,11 @@ function openPage(startTime, getStorage) {
       now = at;
       interval();
     },
+    setHidden(hidden, at = now) {
+      now = at;
+      document.hidden = hidden;
+      document.dispatchEvent(new Event('visibilitychange'));
+    },
     runTimeouts(at) {
       now = at;
       for (const [id, { callback, due }] of timeouts) {
@@ -119,49 +129,146 @@ function openPage(startTime, getStorage) {
   };
 }
 
+function assertTitle(page, expected) {
+  assert.equal(page.title, expected);
+  for (const title of page.writtenTitles) {
+    assert.match(title, /^(?:Focus Timer|(?:0|[1-9]\d*):[0-5]\d · (?:Focus|Break))$/);
+  }
+}
+
 test('the tab title is Focus Timer before scripts run, on load and after saving idle durations', () => {
   const page = openPage(new Date(2026, 10, 27, 12).getTime(), memoryStorage);
   assert.equal(initialTitle, 'Focus Timer');
-  assert.equal(page.title, 'Focus Timer');
+  assertTitle(page, 'Focus Timer');
   assert.equal(page.titleWrites, 0);
 
   page.submit('7', '3');
   assert.equal(page.get('countdown').textContent, '07:00');
-  assert.equal(page.title, 'Focus Timer');
+  assertTitle(page, 'Focus Timer');
   assert.equal(page.titleWrites, 0);
 });
 
-test('the tab title follows the countdown through focus, break, pause and button reset', () => {
+test('the tab title shows the final focus second and switches to Break at the deadline', () => {
   const start = new Date(2026, 10, 27, 12).getTime();
   const page = openPage(start, memoryStorage);
   page.toggle();
-  assert.equal(page.title, '25:00 · Focus');
+  assertTitle(page, '25:00 · Focus');
   const writesAfterStart = page.titleWrites;
   page.tick(start + 250);
   assert.equal(page.titleWrites, writesAfterStart);
   page.tick(start + 1000);
-  assert.equal(page.title, '24:59 · Focus');
+  assertTitle(page, '24:59 · Focus');
 
   const breakStart = start + 25 * minute;
+  page.tick(breakStart - 1000);
+  assertTitle(page, '0:01 · Focus');
+  page.tick(breakStart - 1);
+  assertTitle(page, '0:01 · Focus');
   page.tick(breakStart);
-  assert.equal(page.title, '5:00 · Break');
+  assertTitle(page, '5:00 · Break');
   assert.equal(page.get('countdown').textContent, '05:00');
   page.tick(breakStart + 1000);
-  assert.equal(page.title, '4:59 · Break');
+  assertTitle(page, '4:59 · Break');
   assert.equal(page.get('countdown').textContent, '04:59');
+});
+
+test('the tab title stays on Focus when paused before the first tick', () => {
+  const start = new Date(2026, 10, 27, 12).getTime();
+  const page = openPage(start, memoryStorage);
+  page.toggle();
+  assertTitle(page, '25:00 · Focus');
+  page.toggle();
+  assert.equal(page.get('toggle').textContent, 'Start');
+  assertTitle(page, '25:00 · Focus');
+});
+
+test('resetting during a running break restores the default tab title', () => {
+  const start = new Date(2026, 10, 27, 12).getTime();
+  const page = openPage(start, memoryStorage);
+  page.toggle();
+  page.tick(start + 25 * minute + 1000);
+  assert.equal(page.get('toggle').textContent, 'Pause');
+  assertTitle(page, '4:59 · Break');
+
+  page.get('reset').dispatchEvent(new Event('click'));
+  assertTitle(page, 'Focus Timer');
+});
+
+test('the tab title survives saving durations while paused and returns to default on reset', () => {
+  const start = new Date(2026, 10, 27, 12).getTime();
+  const page = openPage(start, memoryStorage);
+  page.toggle();
+  page.tick(start + 25 * minute + 1000);
+  assertTitle(page, '4:59 · Break');
 
   const writesBeforePause = page.titleWrites;
   page.toggle();
   assert.equal(page.get('toggle').textContent, 'Start');
-  assert.equal(page.title, '4:59 · Break');
+  assertTitle(page, '4:59 · Break');
   assert.equal(page.titleWrites, writesBeforePause);
   page.submit('8', '3');
-  assert.equal(page.title, '4:59 · Break');
+  assertTitle(page, '4:59 · Break');
   assert.equal(page.titleWrites, writesBeforePause);
 
   page.get('reset').dispatchEvent(new Event('click'));
-  assert.equal(page.title, 'Focus Timer');
+  assertTitle(page, 'Focus Timer');
   assert.equal(page.get('countdown').textContent, '08:00');
+
+  page.submit('90', '1');
+  assertTitle(page, 'Focus Timer');
+  assert.equal(page.get('countdown').textContent, '90:00');
+  page.toggle();
+  assertTitle(page, '90:00 · Focus');
+});
+
+test('valid and invalid duration edits preserve the title of a paused focus session', () => {
+  const start = new Date(2026, 10, 27, 12).getTime();
+  const page = openPage(start, memoryStorage);
+  page.toggle();
+  page.toggle(start + 12 * minute + 26000);
+  assertTitle(page, '12:34 · Focus');
+  const writesBeforeEdits = page.titleWrites;
+
+  page.submit('0', '3');
+  assertTitle(page, '12:34 · Focus');
+  page.submit('7', '3');
+  assertTitle(page, '12:34 · Focus');
+  assert.equal(page.titleWrites, writesBeforeEdits);
+});
+
+test('a late refresh shows the phase and remaining time after several phase changes', () => {
+  const start = new Date(2026, 10, 27, 12).getTime();
+  const page = openPage(start, memoryStorage);
+  page.submit('2', '1');
+  page.toggle();
+  assertTitle(page, '2:00 · Focus');
+
+  // Three full cycles, then 17 seconds into focus (six phase changes).
+  page.tick(start + 9 * minute + 17000);
+  assertTitle(page, '1:43 · Focus');
+  // Three more phase changes land 11 seconds into a break.
+  page.tick(start + 14 * minute + 11000);
+  assertTitle(page, '0:49 · Break');
+});
+
+test('the tab title matches the countdown on the next refresh after the page becomes visible', () => {
+  const start = new Date(2026, 10, 27, 12).getTime();
+  const page = openPage(start, memoryStorage);
+  page.submit('1', '1');
+  page.toggle();
+  assertTitle(page, '1:00 · Focus');
+
+  page.setHidden(true, start + 1000);
+  page.tick(start + 15000);
+  assertTitle(page, '0:45 · Focus');
+  assert.equal(page.get('countdown').textContent, '00:45');
+
+  // No interval callbacks while the focus session expires in the background.
+  page.setHidden(false, start + 65000);
+  page.tick(start + 65250);
+  assertTitle(page, '0:55 · Break');
+  assert.equal(page.get('countdown').textContent, '00:55');
+  assert.equal(page.get('phase').textContent, 'Break');
 });
 
 test('only a valid settings pair changes the timer and survives reload', () => {
@@ -251,10 +358,13 @@ test('Space starts and pauses the timer and prevents the default action', () => 
 
   assert.equal(page.keydown(' '), true);
   assert.equal(page.get('toggle').textContent, 'Pause');
+  assertTitle(page, '25:00 · Focus');
   page.tick(start + 1000);
+  assertTitle(page, '24:59 · Focus');
   assert.equal(page.keydown(' '), true);
   assert.equal(page.get('toggle').textContent, 'Start');
   assert.equal(page.get('countdown').textContent, '24:59');
+  assertTitle(page, '24:59 · Focus');
 });
 
 test('R resets the timer and prevents the default action', () => {
@@ -262,12 +372,12 @@ test('R resets the timer and prevents the default action', () => {
   const page = openPage(start, memoryStorage);
   page.toggle();
   page.tick(start + 1000);
-  assert.equal(page.title, '24:59 · Focus');
+  assertTitle(page, '24:59 · Focus');
 
   assert.equal(page.keydown('R'), true);
   assert.equal(page.get('toggle').textContent, 'Start');
   assert.equal(page.get('countdown').textContent, '25:00');
-  assert.equal(page.title, 'Focus Timer');
+  assertTitle(page, 'Focus Timer');
 });
 
 test('S opens Settings, focuses Focus minutes and prevents the default action', () => {
